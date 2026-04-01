@@ -1,15 +1,21 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as MediaLibrary from 'expo-media-library';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
+  Image,
   LayoutAnimation,
   Platform,
   Pressable,
+  Share,
   ScrollView,
   StyleSheet,
   Text,
   UIManager,
   View,
 } from 'react-native';
+import { captureRef } from 'react-native-view-shot';
 import { plan1 } from '../data/plan1';
 import MealCard, { MealCardLog } from '../components/MealCard';
 
@@ -33,9 +39,13 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 }
 
 export default function TodayScreen() {
+  const summaryCaptureRef = useRef<View>(null);
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [mealLogs, setMealLogs] = useState<MealLogsState>({});
+  const [summaryLogs, setSummaryLogs] = useState<MealLogsState>({});
+  const [isSharing, setIsSharing] = useState(false);
+  const [summaryCaptureReady, setSummaryCaptureReady] = useState(false);
 
   const loadState = useCallback(async () => {
     try {
@@ -159,6 +169,71 @@ export default function TodayScreen() {
     [persistMealLogs]
   );
 
+  const handleShareDay = useCallback(async () => {
+    if (isSharing) {
+      return;
+    }
+
+    setIsSharing(true);
+    const todayLabel = new Date().toLocaleDateString(undefined, {
+      weekday: 'long',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+
+    const compressLogsEntries = await Promise.all(
+      Object.entries(mealLogs).map(async ([mealId, log]) => {
+        if (!log?.photoUri) {
+          return [mealId, log] as const;
+        }
+
+        try {
+          const compressed = await ImageManipulator.manipulateAsync(
+            log.photoUri,
+            [{ resize: { width: 800 } }],
+            {
+              compress: 0.8,
+              format: ImageManipulator.SaveFormat.JPEG,
+            }
+          );
+          return [mealId, { ...log, photoUri: compressed.uri }] as const;
+        } catch {
+          return [mealId, log] as const;
+        }
+      })
+    );
+
+    const preparedLogs: MealLogsState = Object.fromEntries(compressLogsEntries);
+    setSummaryLogs(preparedLogs);
+    setSummaryCaptureReady(true);
+
+    try {
+      const mediaPermission = await MediaLibrary.requestPermissionsAsync();
+      const canSaveToPhotos = mediaPermission.status === 'granted';
+
+      await new Promise((resolve) => setTimeout(resolve, 120));
+
+      const uri = await captureRef(summaryCaptureRef, {
+        format: 'png',
+        quality: 1,
+      });
+
+      if (canSaveToPhotos) {
+        await MediaLibrary.saveToLibraryAsync(uri);
+        Alert.alert('Saved', 'Your daily summary was saved to Photos.');
+      }
+
+      await Share.share({
+        url: uri,
+        message: `My Nutrition Day — ${todayLabel}`,
+      });
+    } finally {
+      setSummaryCaptureReady(false);
+      setIsSharing(false);
+    }
+  }, [checkedIds, isSharing, mealLogs]);
+
   return (
     <View style={styles.screen}>
       <Text style={styles.title}>Today</Text>
@@ -207,7 +282,59 @@ export default function TodayScreen() {
             />
           );
         })}
+
+        <Pressable style={styles.shareButton} onPress={() => void handleShareDay()}>
+          <Text style={styles.shareButtonText}>Share My Day</Text>
+        </Pressable>
       </ScrollView>
+
+      <View style={styles.hiddenSummaryRoot} pointerEvents="none">
+        {summaryCaptureReady ? (
+          <View style={styles.summaryCard} collapsable={false} ref={summaryCaptureRef}>
+            <Text style={styles.summaryTitle}>My Nutrition Day</Text>
+            <Text style={styles.summaryDate}>
+              {new Date().toLocaleDateString(undefined, {
+                weekday: 'long',
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              })}
+            </Text>
+
+            <Text style={styles.summaryMeta}>
+              Meals completed: {checkedIds.length}/{plan1.length}
+            </Text>
+            <View style={styles.summaryProgressTrack}>
+              <View
+                style={[
+                  styles.summaryProgressFill,
+                  { width: `${(checkedIds.length / plan1.length) * 100}%` },
+                ]}
+              />
+            </View>
+
+            {plan1.map((meal) => {
+              const done = checkedIds.includes(meal.id);
+              const log = summaryLogs[meal.id];
+              const note = log?.note?.trim();
+
+              return (
+                <View key={`summary-${meal.id}`} style={styles.summaryMealRow}>
+                  <Text style={styles.summaryMealLine}>
+                    {done ? '✅' : '❌'} {meal.title} ({meal.time})
+                  </Text>
+                  {log?.photoUri ? (
+                    <Image source={{ uri: log.photoUri }} style={styles.summaryThumb} />
+                  ) : null}
+                  {note ? <Text style={styles.summaryNote}>Note: {note}</Text> : null}
+                </View>
+              );
+            })}
+
+            <Text style={styles.summaryFooter}>Water: Not tracked yet</Text>
+          </View>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -250,5 +377,87 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingBottom: 20,
+  },
+  shareButton: {
+    width: '100%',
+    marginTop: 8,
+    marginBottom: 8,
+    backgroundColor: ACCENT,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shareButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  hiddenSummaryRoot: {
+    position: 'absolute',
+    left: -9999,
+    top: 0,
+    width: 360,
+  },
+  summaryCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: '#D5EFE7',
+  },
+  summaryTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#116E53',
+  },
+  summaryDate: {
+    marginTop: 2,
+    fontSize: 12,
+    color: '#4B5563',
+  },
+  summaryMeta: {
+    marginTop: 12,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0F5132',
+  },
+  summaryProgressTrack: {
+    marginTop: 8,
+    height: 10,
+    borderRadius: 999,
+    backgroundColor: '#E5E7EB',
+    overflow: 'hidden',
+  },
+  summaryProgressFill: {
+    height: '100%',
+    backgroundColor: ACCENT,
+  },
+  summaryMealRow: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+  },
+  summaryMealLine: {
+    color: '#111827',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  summaryThumb: {
+    marginTop: 6,
+    width: 84,
+    height: 84,
+    borderRadius: 8,
+  },
+  summaryNote: {
+    marginTop: 5,
+    color: '#374151',
+    fontSize: 12,
+  },
+  summaryFooter: {
+    marginTop: 14,
+    color: '#4B5563',
+    fontSize: 12,
   },
 });
