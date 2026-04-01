@@ -1,12 +1,10 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
-const STORAGE_KEY = 'last_quote_date';
 const ACCENT = '#1D9E75';
 
-const quotes = [
+export const motivationalQuotes = [
   'Fat loss happens between meals. Every time you skip the snack, your body gets to work.',
   'Consistency over 30 days beats perfection over 7. Just show up.',
   'Protein at breakfast reduces cravings all day. You already did the hardest part.',
@@ -30,56 +28,30 @@ const quotes = [
 ];
 
 type Props = {
-  enabled?: boolean;
+  visible: boolean;
+  quote: string;
+  onDismiss: () => void;
 };
 
-const getTodayKey = () => new Date().toISOString().slice(0, 10);
-
-export default function MotivationalQuote({ enabled = true }: Props) {
-  const [visible, setVisible] = useState(false);
-  const [dailyQuote, setDailyQuote] = useState('');
-
-  useEffect(() => {
-    if (!enabled) {
-      setVisible(false);
-      return;
-    }
-
-    const maybeShowQuote = async () => {
-      const today = getTodayKey();
-      try {
-        const lastShown = await AsyncStorage.getItem(STORAGE_KEY);
-        if (lastShown === today) {
-          setVisible(false);
-          return;
-        }
-
-        const quoteIndex = Math.floor(Math.random() * quotes.length);
-        setDailyQuote(quotes[quoteIndex] ?? quotes[0]);
-        setVisible(true);
-        await AsyncStorage.setItem(STORAGE_KEY, today);
-      } catch {
-        const quoteIndex = Math.floor(Math.random() * quotes.length);
-        setDailyQuote(quotes[quoteIndex] ?? quotes[0]);
-        setVisible(true);
-      }
-    };
-
-    void maybeShowQuote();
-  }, [enabled]);
-
+export default function MotivationalQuote({ visible, quote, onDismiss }: Props) {
   return (
-    <Modal visible={visible} transparent animationType="fade">
+    <Modal
+      visible={visible}
+      transparent={false}
+      animationType="fade"
+      presentationStyle="fullScreen"
+      statusBarTranslucent
+    >
       <LinearGradient colors={[ACCENT, '#168264', '#0F6A52']} style={styles.overlay}>
         <View style={styles.decorCircleTop} />
         <View style={styles.decorCircleBottom} />
 
         <View style={styles.content}>
           <Text style={styles.kicker}>Daily reminder</Text>
-          <Text style={styles.quoteText}>{dailyQuote}</Text>
+          <Text style={styles.quoteText}>{quote}</Text>
         </View>
 
-        <Pressable style={styles.button} onPress={() => setVisible(false)}>
+        <Pressable style={styles.button} onPress={onDismiss}>
           <Text style={styles.buttonText}>Let&apos;s go {'\u2192'}</Text>
         </Pressable>
       </LinearGradient>

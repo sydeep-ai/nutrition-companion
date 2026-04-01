@@ -16,12 +16,13 @@ import {
   View,
 } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
-import { plan1 } from '../data/plan1';
+import { Meal, plan1 } from '../data/plan1';
 import MealCard, { MealCardLog } from '../components/MealCard';
 
 const ACCENT = '#1D9E75';
 const STORAGE_KEY = 'today_tick_state_v1';
 const MEAL_LOGS_STORAGE_KEY = 'meal_logs_v1';
+const MEAL_PLAN_STORAGE_KEY = 'meal_plan';
 
 type TickState = {
   date: string;
@@ -38,11 +39,17 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-export default function TodayScreen() {
+type Props = {
+  onPressHome?: () => void;
+};
+
+export default function TodayScreen({ onPressHome }: Props) {
   const summaryCaptureRef = useRef<View>(null);
+  const [meals, setMeals] = useState<Meal[]>(plan1);
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [mealLogs, setMealLogs] = useState<MealLogsState>({});
+  const [userName, setUserName] = useState('');
   const [summaryLogs, setSummaryLogs] = useState<MealLogsState>({});
   const [isSharing, setIsSharing] = useState(false);
   const [summaryCaptureReady, setSummaryCaptureReady] = useState(false);
@@ -96,6 +103,24 @@ export default function TodayScreen() {
     }
   }, []);
 
+  const loadMealPlan = useCallback(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(MEAL_PLAN_STORAGE_KEY);
+      if (!raw) {
+        setMeals(plan1);
+        return;
+      }
+      const parsed = JSON.parse(raw) as Meal[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        setMeals(parsed);
+      } else {
+        setMeals(plan1);
+      }
+    } catch {
+      setMeals(plan1);
+    }
+  }, []);
+
   const persistMealLogs = useCallback(async (logs: MealLogsState) => {
     try {
       await AsyncStorage.setItem(MEAL_LOGS_STORAGE_KEY, JSON.stringify(logs));
@@ -107,7 +132,16 @@ export default function TodayScreen() {
   useEffect(() => {
     loadState();
     loadMealLogs();
-  }, [loadState, loadMealLogs]);
+    loadMealPlan();
+  }, [loadState, loadMealLogs, loadMealPlan]);
+
+  useEffect(() => {
+    const loadUserName = async () => {
+      const raw = await AsyncStorage.getItem('user_name');
+      setUserName(raw?.trim() || '');
+    };
+    void loadUserName();
+  }, []);
 
   // Reset at midnight if the app remains open.
   useEffect(() => {
@@ -150,7 +184,10 @@ export default function TodayScreen() {
     setExpandedId((prev) => (prev === mealId ? null : mealId));
   };
 
-  const progress = useMemo(() => checkedIds.length / plan1.length, [checkedIds.length]);
+  const progress = useMemo(
+    () => (meals.length > 0 ? checkedIds.length / meals.length : 0),
+    [checkedIds.length, meals.length]
+  );
 
   const updateMealLog = useCallback(
     (mealId: string, patch: Partial<MealCardLog>) => {
@@ -232,17 +269,28 @@ export default function TodayScreen() {
       setSummaryCaptureReady(false);
       setIsSharing(false);
     }
-  }, [checkedIds, isSharing, mealLogs]);
+  }, [checkedIds, isSharing, mealLogs, meals]);
 
   return (
     <View style={styles.screen}>
-      <Text style={styles.title}>Today</Text>
+      <View style={styles.headerRow}>
+        <Text style={styles.title}>Today</Text>
+        <Pressable style={styles.homeButton} onPress={onPressHome}>
+          {userName ? (
+            <Text style={styles.avatarText}>
+              {userName.charAt(0).toUpperCase()}
+            </Text>
+          ) : (
+            <Text style={styles.homeIcon}>🏠</Text>
+          )}
+        </Pressable>
+      </View>
 
       <View style={styles.progressWrap}>
         <View style={styles.progressRow}>
           <Text style={styles.progressText}>Meals logged</Text>
           <Text style={styles.progressText}>
-            {checkedIds.length}/{plan1.length}
+            {checkedIds.length}/{meals.length}
           </Text>
         </View>
         <View style={styles.progressTrack}>
@@ -251,7 +299,7 @@ export default function TodayScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false}>
-        {plan1.map((meal) => {
+        {meals.map((meal) => {
           const checked = checkedIds.includes(meal.id);
           const expanded = expandedId === meal.id;
           const log = mealLogs[meal.id];
@@ -272,6 +320,12 @@ export default function TodayScreen() {
                 updateMealLog(meal.id, {
                   photoUri: uri,
                   timestamp: new Date().toISOString(),
+                })
+              }
+              onDeletePhoto={() =>
+                updateMealLog(meal.id, {
+                  photoUri: undefined,
+                  timestamp: undefined,
                 })
               }
               onChangeNote={(text) =>
@@ -302,18 +356,18 @@ export default function TodayScreen() {
             </Text>
 
             <Text style={styles.summaryMeta}>
-              Meals completed: {checkedIds.length}/{plan1.length}
+              Meals completed: {checkedIds.length}/{meals.length}
             </Text>
             <View style={styles.summaryProgressTrack}>
               <View
                 style={[
                   styles.summaryProgressFill,
-                  { width: `${(checkedIds.length / plan1.length) * 100}%` },
+                  { width: `${meals.length > 0 ? (checkedIds.length / meals.length) * 100 : 0}%` },
                 ]}
               />
             </View>
 
-            {plan1.map((meal) => {
+            {meals.map((meal) => {
               const done = checkedIds.includes(meal.id);
               const log = summaryLogs[meal.id];
               const note = log?.note?.trim();
@@ -350,7 +404,28 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '700',
     color: '#111827',
+  },
+  headerRow: {
     marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  homeButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 999,
+    backgroundColor: ACCENT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  homeIcon: {
+    fontSize: 18,
+  },
+  avatarText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '800',
   },
   progressWrap: {
     marginBottom: 16,

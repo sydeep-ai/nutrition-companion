@@ -29,6 +29,7 @@ type Props = {
   onToggleChecked: () => void;
   onToggleExpanded: () => void;
   onPhotoCaptured: (uri: string) => void;
+  onDeletePhoto: () => void;
   onChangeNote: (text: string) => void;
 };
 
@@ -42,8 +43,19 @@ export const MealCard: React.FC<Props> = ({
   onToggleChecked,
   onToggleExpanded,
   onPhotoCaptured,
+  onDeletePhoto,
   onChangeNote,
 }) => {
+  const splitTitle = (rawTitle: string) => {
+    const match = rawTitle.match(/^(\S+)\s+(.*)$/);
+    if (!match) {
+      return { emoji: '', text: rawTitle };
+    }
+    return { emoji: match[1], text: match[2] };
+  };
+
+  const { emoji, text } = splitTitle(title);
+
   const handleTakePhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
@@ -118,9 +130,12 @@ export const MealCard: React.FC<Props> = ({
         </Pressable>
 
         <View style={styles.headerTextWrap}>
-          <Text style={[styles.mealTitle, checked && styles.mealTitleChecked]}>
-            {title}
-          </Text>
+          <View style={styles.mealTitleRow}>
+            {emoji ? <Text style={styles.mealEmoji}>{emoji}</Text> : null}
+            <Text style={[styles.mealTitle, checked && styles.mealTitleChecked]}>
+              {text}
+            </Text>
+          </View>
           <Text style={styles.mealTime}>{time}</Text>
         </View>
 
@@ -140,11 +155,22 @@ export const MealCard: React.FC<Props> = ({
       {expanded && (
         <View style={styles.logSection}>
           {log?.photoUri ? (
-            <Image
-              source={{ uri: log.photoUri }}
-              style={styles.photo}
-              resizeMode="cover"
-            />
+            <View style={styles.photoWrap}>
+              <Image
+                source={{ uri: log.photoUri }}
+                style={styles.photo}
+                resizeMode="cover"
+              />
+              <Pressable
+                style={styles.deletePhotoButton}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  onDeletePhoto();
+                }}
+              >
+                <Text style={styles.deletePhotoButtonText}>✕</Text>
+              </Pressable>
+            </View>
           ) : null}
 
           <TextInput
@@ -207,6 +233,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#111827',
   },
+  mealTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  mealEmoji: {
+    fontSize: 16,
+  },
   mealTitleChecked: {
     textDecorationLine: 'line-through',
     color: '#6B7280',
@@ -243,6 +277,26 @@ const styles = StyleSheet.create({
     height: 160,
     borderRadius: 12,
     marginBottom: 8,
+  },
+  photoWrap: {
+    position: 'relative',
+  },
+  deletePhotoButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#DC2626',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deletePhotoButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 14,
   },
   noteInput: {
     minHeight: 40,

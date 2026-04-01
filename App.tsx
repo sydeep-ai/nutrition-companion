@@ -3,17 +3,30 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useState } from 'react';
 import TodayScreen from './app/index';
 import OnboardingScreen from './app/onboarding';
-import MotivationalQuote from './components/MotivationalQuote';
+import MotivationalQuote, { motivationalQuotes } from './components/MotivationalQuote';
+import DashboardScreen from './app/dashboard';
 import { scheduleAllNotifications } from './services/notifications';
 
 export default function App() {
   const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null);
+  const [activeScreen, setActiveScreen] = useState<'dashboard' | 'today'>('dashboard');
+  const [showDailyQuote, setShowDailyQuote] = useState(false);
+  const [dailyQuote, setDailyQuote] = useState('');
 
   useEffect(() => {
     const bootstrap = async () => {
       const onboardingFlag = await AsyncStorage.getItem('onboarding_complete');
       const complete = onboardingFlag === 'true';
       setOnboardingComplete(complete);
+
+      if (!complete) {
+        return;
+      }
+
+      // Debug mode: show quote on every app launch (no date checks).
+      const quoteIndex = Math.floor(Math.random() * motivationalQuotes.length);
+      setDailyQuote(motivationalQuotes[quoteIndex] ?? motivationalQuotes[0]);
+      setShowDailyQuote(true);
     };
 
     void bootstrap();
@@ -33,12 +46,28 @@ export default function App() {
     return null;
   }
 
+  if (showDailyQuote) {
+    return (
+      <>
+        <MotivationalQuote
+          visible={showDailyQuote}
+          quote={dailyQuote}
+          onDismiss={() => setShowDailyQuote(false)}
+        />
+        <StatusBar style="light" />
+      </>
+    );
+  }
+
   return (
     <>
       {onboardingComplete ? (
         <>
-          <TodayScreen />
-          <MotivationalQuote enabled={onboardingComplete} />
+          {activeScreen === 'dashboard' ? (
+            <DashboardScreen onStartToday={() => setActiveScreen('today')} />
+          ) : (
+            <TodayScreen onPressHome={() => setActiveScreen('dashboard')} />
+          )}
         </>
       ) : (
         <OnboardingScreen onComplete={() => setOnboardingComplete(true)} />
