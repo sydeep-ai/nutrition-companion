@@ -11,13 +11,19 @@ import {
   View,
 } from 'react-native';
 import { plan1 } from '../data/plan1';
+import MealCard, { MealCardLog } from '../components/MealCard';
 
 const ACCENT = '#1D9E75';
 const STORAGE_KEY = 'today_tick_state_v1';
+const MEAL_LOGS_STORAGE_KEY = 'meal_logs_v1';
 
 type TickState = {
   date: string;
   checkedIds: string[];
+};
+
+type MealLogsState = {
+  [mealId: string]: MealCardLog;
 };
 
 const getTodayKey = () => new Date().toISOString().slice(0, 10);
@@ -29,6 +35,7 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 export default function TodayScreen() {
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [mealLogs, setMealLogs] = useState<MealLogsState>({});
 
   const loadState = useCallback(async () => {
     try {
@@ -65,9 +72,32 @@ export default function TodayScreen() {
     }
   }, []);
 
+  const loadMealLogs = useCallback(async () => {
+    try {
+      const raw = await AsyncStorage.getItem(MEAL_LOGS_STORAGE_KEY);
+      if (!raw) {
+        setMealLogs({});
+        return;
+      }
+      const parsed = JSON.parse(raw) as MealLogsState;
+      setMealLogs(parsed || {});
+    } catch {
+      setMealLogs({});
+    }
+  }, []);
+
+  const persistMealLogs = useCallback(async (logs: MealLogsState) => {
+    try {
+      await AsyncStorage.setItem(MEAL_LOGS_STORAGE_KEY, JSON.stringify(logs));
+    } catch {
+      // ignore transient persistence failures
+    }
+  }, []);
+
   useEffect(() => {
     loadState();
-  }, [loadState]);
+    loadMealLogs();
+  }, [loadState, loadMealLogs]);
 
   // Reset at midnight if the app remains open.
   useEffect(() => {
@@ -112,6 +142,23 @@ export default function TodayScreen() {
 
   const progress = useMemo(() => checkedIds.length / plan1.length, [checkedIds.length]);
 
+  const updateMealLog = useCallback(
+    (mealId: string, patch: Partial<MealCardLog>) => {
+      setMealLogs((prev) => {
+        const next: MealLogsState = {
+          ...prev,
+          [mealId]: {
+            ...prev[mealId],
+            ...patch,
+          },
+        };
+        void persistMealLogs(next);
+        return next;
+      });
+    },
+    [persistMealLogs]
+  );
+
   return (
     <View style={styles.screen}>
       <Text style={styles.title}>Today</Text>
@@ -132,30 +179,32 @@ export default function TodayScreen() {
         {plan1.map((meal) => {
           const checked = checkedIds.includes(meal.id);
           const expanded = expandedId === meal.id;
+          const log = mealLogs[meal.id];
 
           return (
-            <Pressable key={meal.id} onPress={() => toggleExpanded(meal.id)} style={styles.card}>
-              <View style={styles.cardHeader}>
-                <Pressable
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    toggleChecked(meal.id);
-                  }}
-                  style={[styles.checkbox, checked && styles.checkboxChecked]}
-                >
-                  {checked ? <Text style={styles.checkmark}>✓</Text> : null}
-                </Pressable>
-
-                <View style={styles.headerTextWrap}>
-                  <Text style={[styles.mealTitle, checked && styles.mealTitleChecked]}>
-                    {meal.title}
-                  </Text>
-                  <Text style={styles.mealTime}>{meal.time}</Text>
-                </View>
-              </View>
-
-              {expanded ? <Text style={styles.details}>{meal.details}</Text> : null}
-            </Pressable>
+            <MealCard
+              key={meal.id}
+              id={meal.id}
+              title={meal.title}
+              time={meal.time}
+              details={meal.details}
+              checked={checked}
+              expanded={expanded}
+              log={log}
+              onToggleChecked={() => toggleChecked(meal.id)}
+              onToggleExpanded={() => toggleExpanded(meal.id)}
+              onPhotoCaptured={(uri) =>
+                updateMealLog(meal.id, {
+                  photoUri: uri,
+                  timestamp: new Date().toISOString(),
+                })
+              }
+              onChangeNote={(text) =>
+                updateMealLog(meal.id, {
+                  note: text,
+                })
+              }
+            />
           );
         })}
       </ScrollView>
@@ -201,59 +250,5 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingBottom: 20,
-  },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E7ECEA',
-    padding: 14,
-    marginBottom: 12,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  headerTextWrap: {
-    flex: 1,
-  },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: ACCENT,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  checkboxChecked: {
-    backgroundColor: ACCENT,
-  },
-  checkmark: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 16,
-  },
-  mealTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  mealTitleChecked: {
-    textDecorationLine: 'line-through',
-    color: '#6B7280',
-  },
-  mealTime: {
-    marginTop: 2,
-    fontSize: 13,
-    color: '#6B7280',
-  },
-  details: {
-    marginTop: 10,
-    color: '#374151',
-    fontSize: 14,
-    lineHeight: 20,
   },
 });

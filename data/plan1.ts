@@ -7,39 +7,41 @@ export type Meal = {
 
 export const plan1: Meal[] = [
   {
-    id: '1',
+    id: 'morning-ritual',
+    title: 'Morning Ritual',
+    time: '7:00am',
+    details: 'Warm water with ½ tsp ghee + 4 soaked almonds',
+  },
+  {
+    id: 'breakfast',
     title: 'Breakfast',
-    time: '7:30 AM',
-    details: 'Oats with yogurt and berries.',
+    time: '9:15am',
+    details:
+      '2 whole egg veggie omelette with lots of veggies + feta cheese · 1 slice sourdough',
   },
   {
-    id: '2',
-    title: 'Morning Snack',
-    time: '10:30 AM',
-    details: 'Apple with peanut butter.',
-  },
-  {
-    id: '3',
+    id: 'lunch',
     title: 'Lunch',
-    time: '1:00 PM',
-    details: 'Chicken, rice, and salad.',
+    time: '12:30pm',
+    details:
+      '1 Roti or 1/2 cup Quinoa + 1 cup cooked veg + 2 bowls of Daal',
   },
   {
-    id: '4',
+    id: 'afternoon-snack',
     title: 'Afternoon Snack',
-    time: '4:00 PM',
-    details: 'Carrots with hummus.',
+    time: '3:00pm',
+    details: 'Tea + fresh fruit or veggie sticks',
   },
   {
-    id: '5',
+    id: 'dinner',
     title: 'Dinner',
-    time: '7:00 PM',
-    details: 'Salmon, sweet potato, and broccoli.',
+    time: '6:30pm',
+    details: 'Family meal',
   },
   {
-    id: '6',
-    title: 'Evening Snack',
-    time: '9:00 PM',
-    details: 'Cottage cheese and cucumber.',
+    id: 'iron-supplement',
+    title: 'Iron Supplement',
+    time: '10:00pm',
+    details: 'Take iron supplement before bed',
   },
 ];
