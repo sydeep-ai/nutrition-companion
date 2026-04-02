@@ -195,10 +195,10 @@ export const MealCard: React.FC<Props> = ({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#2E2E2E',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#E7ECEA',
+    borderColor: '#3F3F3F',
     padding: 14,
     marginBottom: 12,
   },
@@ -231,7 +231,7 @@ const styles = StyleSheet.create({
   mealTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#111827',
+    color: '#F3F4F6',
   },
   mealTitleRow: {
     flexDirection: 'row',
@@ -243,12 +243,12 @@ const styles = StyleSheet.create({
   },
   mealTitleChecked: {
     textDecorationLine: 'line-through',
-    color: '#6B7280',
+    color: '#9CA3AF',
   },
   mealTime: {
     marginTop: 2,
     fontSize: 13,
-    color: '#6B7280',
+    color: '#9CA3AF',
   },
   cameraButton: {
     width: 28,
@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
   },
   details: {
     marginTop: 10,
-    color: '#374151',
+    color: '#D1D5DB',
     fontSize: 14,
     lineHeight: 20,
   },
@@ -302,11 +302,12 @@ const styles = StyleSheet.create({
     minHeight: 40,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#4B5563',
+    backgroundColor: '#1F1F1F',
     paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 13,
-    color: '#111827',
+    color: '#F3F4F6',
   },
   timestamp: {
     marginTop: 4,

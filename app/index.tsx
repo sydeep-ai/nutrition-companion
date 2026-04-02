@@ -16,10 +16,10 @@ import {
   View,
 } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
-import { Meal, plan1 } from '../data/plan1';
 import MealCard, { MealCardLog } from '../components/MealCard';
+import { DEFAULT_MEAL_PLAN, PlanMeal } from '../data/defaultMealPlan';
 
-const ACCENT = '#1D9E75';
+const ACCENT = '#D85A30';
 const STORAGE_KEY = 'today_tick_state_v1';
 const MEAL_LOGS_STORAGE_KEY = 'meal_logs_v1';
 const MEAL_PLAN_STORAGE_KEY = 'meal_plan';
@@ -45,7 +45,7 @@ type Props = {
 
 export default function TodayScreen({ onPressHome }: Props) {
   const summaryCaptureRef = useRef<View>(null);
-  const [meals, setMeals] = useState<Meal[]>(plan1);
+  const [meals, setMeals] = useState<PlanMeal[]>(DEFAULT_MEAL_PLAN);
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [mealLogs, setMealLogs] = useState<MealLogsState>({});
@@ -107,17 +107,17 @@ export default function TodayScreen({ onPressHome }: Props) {
     try {
       const raw = await AsyncStorage.getItem(MEAL_PLAN_STORAGE_KEY);
       if (!raw) {
-        setMeals(plan1);
+        setMeals(DEFAULT_MEAL_PLAN);
         return;
       }
-      const parsed = JSON.parse(raw) as Meal[];
+      const parsed = JSON.parse(raw) as PlanMeal[];
       if (Array.isArray(parsed) && parsed.length > 0) {
         setMeals(parsed);
       } else {
-        setMeals(plan1);
+        setMeals(DEFAULT_MEAL_PLAN);
       }
     } catch {
-      setMeals(plan1);
+      setMeals(DEFAULT_MEAL_PLAN);
     }
   }, []);
 
@@ -303,12 +303,13 @@ export default function TodayScreen({ onPressHome }: Props) {
           const checked = checkedIds.includes(meal.id);
           const expanded = expandedId === meal.id;
           const log = mealLogs[meal.id];
+          const title = `${meal.emoji} ${meal.name}`.trim();
 
           return (
             <MealCard
               key={meal.id}
               id={meal.id}
-              title={meal.title}
+              title={title}
               time={meal.time}
               details={meal.details}
               checked={checked}
@@ -371,11 +372,12 @@ export default function TodayScreen({ onPressHome }: Props) {
               const done = checkedIds.includes(meal.id);
               const log = summaryLogs[meal.id];
               const note = log?.note?.trim();
+              const title = `${meal.emoji} ${meal.name}`.trim();
 
               return (
                 <View key={`summary-${meal.id}`} style={styles.summaryMealRow}>
                   <Text style={styles.summaryMealLine}>
-                    {done ? '✅' : '❌'} {meal.title} ({meal.time})
+                    {done ? '✅' : '❌'} {title} ({meal.time})
                   </Text>
                   {log?.photoUri ? (
                     <Image source={{ uri: log.photoUri }} style={styles.summaryThumb} />
@@ -396,14 +398,14 @@ export default function TodayScreen({ onPressHome }: Props) {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#F4F7F6',
+    backgroundColor: '#1A1A1A',
     paddingTop: 64,
     paddingHorizontal: 16,
   },
   title: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#111827',
+    color: '#FAFAFA',
   },
   headerRow: {
     marginBottom: 16,
@@ -436,14 +438,14 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   progressText: {
-    color: '#4B5563',
+    color: '#D1D5DB',
     fontSize: 13,
     fontWeight: '500',
   },
   progressTrack: {
     height: 10,
     borderRadius: 999,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: '#3F3F3F',
     overflow: 'hidden',
   },
   progressFill: {
@@ -479,12 +481,12 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     borderWidth: 2,
-    borderColor: '#D5EFE7',
+    borderColor: '#F1C3B2',
   },
   summaryTitle: {
     fontSize: 22,
     fontWeight: '700',
-    color: '#116E53',
+    color: '#1A1A1A',
   },
   summaryDate: {
     marginTop: 2,
@@ -495,7 +497,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
     fontSize: 13,
     fontWeight: '600',
-    color: '#0F5132',
+    color: '#8A3A20',
   },
   summaryProgressTrack: {
     marginTop: 8,

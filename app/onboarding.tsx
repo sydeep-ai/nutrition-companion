@@ -12,9 +12,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { plan1 } from '../data/plan1';
+import { PlanMeal } from '../data/defaultMealPlan';
 
-const ACCENT = '#1D9E75';
+const ACCENT = '#D85A30';
 const VISION_SLOTS = 5;
 
 type Props = {
@@ -36,9 +36,26 @@ export default function OnboardingScreen({ onComplete }: Props) {
   const [customGoal, setCustomGoal] = useState('');
   const [userWhy, setUserWhy] = useState('');
   const [visionPhotos, setVisionPhotos] = useState<string[]>([]);
+  const [rewardName, setRewardName] = useState('');
+  const [rewardPhoto, setRewardPhoto] = useState<string>('');
   const [selectedTargetDays, setSelectedTargetDays] = useState<number | null>(null);
   const [customTargetDays, setCustomTargetDays] = useState('');
   const [saving, setSaving] = useState(false);
+  const [planMeals, setPlanMeals] = useState<PlanMeal[]>([
+    { id: `meal-${Date.now()}`, emoji: '', name: '', time: '', details: '' },
+  ]);
+  const [showMealPlanError, setShowMealPlanError] = useState(false);
+
+  const emojiCycle = ['🌅', '🍳', '🥗', '🍎', '🍽️', '💊', '🥛', '🌙', '⚡', '🫖'];
+
+  const normalizeMealsForSave = (meals: PlanMeal[]) =>
+    meals.map((m) => ({
+      ...m,
+      emoji: (m.emoji || '🍽️').trim(),
+      name: m.name.trim(),
+      time: m.time.trim(),
+      details: m.details.trim(),
+    }));
 
   const resolvedGoal = useMemo(() => {
     return customGoal.trim() || chipGoal;
@@ -84,7 +101,35 @@ export default function OnboardingScreen({ onComplete }: Props) {
     });
   };
 
-  const goNext = () => setStep((s) => Math.min(s + 1, 6));
+  const pickRewardPhoto = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (permission.status !== 'granted') {
+      Alert.alert(
+        'Photo access needed',
+        'Please enable Photos permission in Settings to add a reward photo.'
+      );
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.85,
+    });
+
+    if (result.canceled || !result.assets?.length) {
+      return;
+    }
+
+    const uri = result.assets[0]?.uri;
+    if (!uri) {
+      return;
+    }
+
+    setRewardPhoto(uri);
+  };
+
+  const goNext = () => setStep((s) => Math.min(s + 1, 7));
   const goBack = () => setStep((s) => Math.max(s - 1, 0));
 
   const finishOnboarding = async () => {
@@ -103,8 +148,11 @@ export default function OnboardingScreen({ onComplete }: Props) {
         ['user_goal', resolvedGoal.trim()],
         ['user_why', userWhy.trim()],
         ['vision_photos', JSON.stringify(visionPhotos.filter(Boolean))],
+        ['reward_name', rewardName.trim()],
+        ['reward_photo', rewardPhoto || ''],
         ['target_days', String(resolvedTargetDays)],
         ['plan_start_date', new Date().toISOString()],
+        ['meal_plan', JSON.stringify(planMeals)],
         ['onboarding_complete', 'true'],
       ]);
       onComplete();
@@ -253,6 +301,44 @@ export default function OnboardingScreen({ onComplete }: Props) {
     if (step === 5) {
       return (
         <View style={styles.stepBody}>
+          <Text style={styles.heading}>What will you reward yourself with?</Text>
+          <Text style={styles.subtext}>
+            Make it something you really want. A trip, an item, an experience — something that
+            makes showing up worth it.
+          </Text>
+
+          <TextInput
+            value={rewardName}
+            onChangeText={setRewardName}
+            placeholder='Reward name (e.g. "Dyson Airwrap")'
+            placeholderTextColor="#9CA3AF"
+            style={styles.input}
+          />
+
+          <Pressable style={styles.rewardCard} onPress={() => void pickRewardPhoto()}>
+            {rewardPhoto ? (
+              <Image source={{ uri: rewardPhoto }} style={styles.rewardImage} />
+            ) : (
+              <View style={styles.rewardPlaceholder}>
+                <Text style={styles.rewardEmoji}>🎁</Text>
+                <Text style={styles.rewardPlaceholderText}>Tap to add a reward photo</Text>
+              </View>
+            )}
+          </Pressable>
+
+          <Pressable style={styles.primaryButton} onPress={goNext}>
+            <Text style={styles.primaryButtonText}>Continue</Text>
+          </Pressable>
+          <Pressable onPress={goNext}>
+            <Text style={styles.skipText}>Skip</Text>
+          </Pressable>
+        </View>
+      );
+    }
+
+    if (step === 6) {
+      return (
+        <View style={styles.stepBody}>
           <Text style={styles.heading}>How many days are you committing to?</Text>
           <View style={styles.targetCardsRow}>
             {[30, 60, 90].map((days) => {
@@ -302,21 +388,123 @@ export default function OnboardingScreen({ onComplete }: Props) {
 
     return (
       <View style={styles.stepBody}>
-        <Text style={styles.heading}>Meal plan preview</Text>
-        <Text style={styles.previewSubtext}>
-          You can customise this anytime from Settings
-        </Text>
+        <Text style={styles.heading}>Build your daily meal plan</Text>
+        <Text style={styles.previewSubtext}>You can customise this anytime from Settings</Text>
 
-        <View style={styles.previewCard}>
-          {plan1.map((meal) => (
-            <View key={meal.id} style={styles.previewRow}>
-              <Text style={styles.previewTime}>{meal.time}</Text>
-              <Text style={styles.previewMeal}>{meal.title}</Text>
+        {showMealPlanError ? (
+          <Text style={styles.errorText}>
+            Please fill in a time and meal name for every meal before continuing.
+          </Text>
+        ) : null}
+
+        {planMeals.map((meal, idx) => {
+          const missingTime = showMealPlanError && !meal.time.trim();
+          const missingName = showMealPlanError && !meal.name.trim();
+          const effectiveEmoji = (meal.emoji || '🍽️').trim();
+
+          return (
+            <View key={meal.id} style={styles.builderCard}>
+              <Pressable
+                style={styles.trashBtn}
+                onPress={() =>
+                  setPlanMeals((prev) => prev.filter((_, i) => i !== idx))
+                }
+              >
+                <Text style={styles.trashText}>🗑️</Text>
+              </Pressable>
+
+              <View style={styles.row1}>
+                <View style={styles.emojiBlock}>
+                  <Pressable
+                    style={styles.emojiPill}
+                    onPress={() => {
+                      setPlanMeals((prev) =>
+                        prev.map((m, i) => {
+                          if (i !== idx) return m;
+                          const current = (m.emoji || '🍽️').trim();
+                          const currentIndex = emojiCycle.indexOf(current);
+                          const nextIndex =
+                            currentIndex >= 0
+                              ? (currentIndex + 1) % emojiCycle.length
+                              : 0;
+                          return { ...m, emoji: emojiCycle[nextIndex] };
+                        })
+                      );
+                    }}
+                  >
+                    <Text style={styles.emojiText}>{effectiveEmoji}</Text>
+                  </Pressable>
+                  <Text style={styles.optionalText}>optional</Text>
+                </View>
+
+                <TextInput
+                  value={meal.time}
+                  onChangeText={(v) =>
+                    setPlanMeals((prev) =>
+                      prev.map((m, i) => (i === idx ? { ...m, time: v } : m))
+                    )
+                  }
+                  placeholder="e.g. 9:15am"
+                  placeholderTextColor="#9CA3AF"
+                  style={[styles.input, styles.timeInput, missingTime && styles.inputError]}
+                />
+              </View>
+
+              <TextInput
+                value={meal.name}
+                onChangeText={(v) =>
+                  setPlanMeals((prev) =>
+                    prev.map((m, i) => (i === idx ? { ...m, name: v } : m))
+                  )
+                }
+                placeholder="e.g. Breakfast"
+                placeholderTextColor="#9CA3AF"
+                style={[styles.input, missingName && styles.inputError]}
+              />
+
+              <TextInput
+                value={meal.details}
+                onChangeText={(v) =>
+                  setPlanMeals((prev) =>
+                    prev.map((m, i) => (i === idx ? { ...m, details: v } : m))
+                  )
+                }
+                placeholder="e.g. 2 eggs, sourdough toast (optional)"
+                placeholderTextColor="#9CA3AF"
+                style={[styles.input, styles.detailsInput]}
+                multiline
+              />
             </View>
-          ))}
-        </View>
+          );
+        })}
 
-        <Pressable style={styles.primaryButton} onPress={() => void finishOnboarding()}>
+        <Pressable
+          style={styles.addMealButton}
+          onPress={() => {
+            const id = `meal-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+            setPlanMeals((prev) => [
+              ...prev,
+              { id, emoji: '', name: '', time: '', details: '' },
+            ]);
+          }}
+        >
+          <Text style={styles.addMealButtonText}>+ Add meal</Text>
+        </Pressable>
+
+        <Pressable
+          style={styles.primaryButton}
+          onPress={() => {
+            const normalized = normalizeMealsForSave(planMeals);
+            const hasMissing = normalized.some((m) => !m.time || !m.name);
+            if (hasMissing) {
+              setShowMealPlanError(true);
+              return;
+            }
+            setShowMealPlanError(false);
+            setPlanMeals(normalized);
+            void finishOnboarding();
+          }}
+        >
           <Text style={styles.primaryButtonText}>{saving ? 'Saving...' : "Let's go"}</Text>
         </Pressable>
       </View>
@@ -336,7 +524,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
               <Text style={styles.backText}>Back</Text>
             </Pressable>
             <Text style={styles.stepText}>
-              {step + 1}/7
+              {step + 1}/8
             </Text>
           </View>
         ) : null}
@@ -349,7 +537,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#F5FBF8',
+    backgroundColor: '#1A1A1A',
   },
   content: {
     flexGrow: 1,
@@ -364,12 +552,12 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   backText: {
-    color: '#4B5563',
+    color: '#D1D5DB',
     fontSize: 14,
     fontWeight: '600',
   },
   stepText: {
-    color: '#6B7280',
+    color: '#9CA3AF',
     fontSize: 13,
   },
   centerStep: {
@@ -384,31 +572,37 @@ const styles = StyleSheet.create({
   appName: {
     fontSize: 34,
     fontWeight: '800',
-    color: '#0F5132',
+    color: '#FAFAFA',
     textAlign: 'center',
   },
   tagline: {
     marginTop: 10,
     marginBottom: 32,
     fontSize: 18,
-    color: '#374151',
+    color: '#D1D5DB',
     textAlign: 'center',
   },
   heading: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#0F172A',
+    color: '#FAFAFA',
+    marginBottom: 14,
+  },
+  subtext: {
+    color: '#D1D5DB',
+    fontSize: 14,
+    lineHeight: 20,
     marginBottom: 14,
   },
   input: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#2E2E2E',
     borderWidth: 1,
-    borderColor: '#D1FAE5',
+    borderColor: '#3F3F3F',
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 11,
     fontSize: 15,
-    color: '#111827',
+    color: '#FAFAFA',
     marginBottom: 18,
   },
   tallInput: {
@@ -433,7 +627,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 14,
     fontWeight: '600',
-    color: '#6B7280',
+    color: '#9CA3AF',
   },
   chipsWrap: {
     flexDirection: 'row',
@@ -442,9 +636,9 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   chip: {
-    backgroundColor: '#ECFDF5',
+    backgroundColor: '#2E2E2E',
     borderWidth: 1,
-    borderColor: '#A7F3D0',
+    borderColor: '#3F3F3F',
     borderRadius: 999,
     paddingVertical: 8,
     paddingHorizontal: 12,
@@ -454,7 +648,7 @@ const styles = StyleSheet.create({
     borderColor: ACCENT,
   },
   chipText: {
-    color: '#065F46',
+    color: '#D1D5DB',
     fontSize: 13,
     fontWeight: '600',
   },
@@ -472,8 +666,8 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#A7F3D0',
-    backgroundColor: '#ECFDF5',
+    borderColor: '#3F3F3F',
+    backgroundColor: '#2E2E2E',
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -484,7 +678,7 @@ const styles = StyleSheet.create({
   },
   visionPlus: {
     fontSize: 28,
-    color: '#047857',
+    color: ACCENT,
     lineHeight: 28,
   },
   targetCardsRow: {
@@ -494,9 +688,9 @@ const styles = StyleSheet.create({
   },
   targetCard: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#2E2E2E',
     borderWidth: 1,
-    borderColor: '#A7F3D0',
+    borderColor: '#3F3F3F',
     borderRadius: 12,
     alignItems: 'center',
     paddingVertical: 18,
@@ -506,38 +700,125 @@ const styles = StyleSheet.create({
     borderColor: ACCENT,
   },
   targetCardText: {
-    color: '#065F46',
+    color: '#D1D5DB',
     fontWeight: '700',
   },
   targetCardTextSelected: {
     color: '#FFFFFF',
   },
   previewSubtext: {
-    color: '#6B7280',
+    color: '#D1D5DB',
     marginBottom: 14,
   },
-  previewCard: {
+  builderCard: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#D1FAE5',
-    backgroundColor: '#FFFFFF',
+    borderColor: '#3F3F3F',
+    backgroundColor: '#2E2E2E',
     padding: 12,
+    marginBottom: 12,
+  },
+  emojiPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#4B5563',
+    backgroundColor: '#1F1F1F',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  emojiText: {
+    fontSize: 16,
+  },
+  optionalText: {
+    marginTop: 4,
+    fontSize: 11,
+    color: '#9CA3AF',
+    textAlign: 'center',
+  },
+  row1: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginBottom: 10,
+  },
+  emojiBlock: {
+    width: 78,
+    alignItems: 'center',
+  },
+  timeInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  detailsInput: {
+    minHeight: 70,
+    textAlignVertical: 'top',
+  },
+  trashBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: '#4B5563',
+    backgroundColor: '#1F1F1F',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  trashText: {
+    fontSize: 16,
+  },
+  addMealButton: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#4B5563',
+    backgroundColor: '#2E2E2E',
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 16,
   },
-  previewRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-    paddingVertical: 8,
+  addMealButtonText: {
+    color: '#D1D5DB',
+    fontWeight: '800',
   },
-  previewTime: {
-    color: '#065F46',
+  errorText: {
+    color: '#FCA5A5',
+    fontSize: 13,
     fontWeight: '700',
+    marginBottom: 12,
   },
-  previewMeal: {
-    color: '#111827',
+  inputError: {
+    borderColor: '#EF4444',
+  },
+  rewardCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#3F3F3F',
+    backgroundColor: '#2E2E2E',
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  rewardImage: {
+    width: '100%',
+    height: 170,
+  },
+  rewardPlaceholder: {
+    height: 170,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  rewardEmoji: {
+    fontSize: 28,
+    marginBottom: 8,
+  },
+  rewardPlaceholderText: {
+    color: '#D1D5DB',
+    fontSize: 14,
+    textAlign: 'center',
     fontWeight: '600',
   },
 });

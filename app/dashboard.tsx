@@ -3,6 +3,7 @@ import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  DevSettings,
   Dimensions,
   Image,
   Modal,
@@ -15,9 +16,16 @@ import {
 } from 'react-native';
 import { Meal, plan1 } from '../data/plan1';
 
-const ACCENT = '#1D9E75';
+const ACCENT = '#D85A30';
+const SURFACE = '#2E2E2E';
+const BG = '#1A1A1A';
+const TEXT_PRIMARY = '#FAFAFA';
+const TEXT_SECONDARY = '#F0997B';
+const COMPLETION = '#1D9E75';
 const TICK_STORAGE_KEY = 'today_tick_state_v1';
 const MEAL_PLAN_STORAGE_KEY = 'meal_plan';
+const REWARD_NAME_STORAGE_KEY = 'reward_name';
+const REWARD_PHOTO_STORAGE_KEY = 'reward_photo';
 
 type Props = {
   onStartToday: () => void;
@@ -36,6 +44,7 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
   const visionCardWidth = Math.floor(screenWidth * 0.85);
   const visionCardGap = 10;
   const visionScrollRef = useRef<ScrollView>(null);
+  const autoPlayRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [userName, setUserName] = useState('');
   const [goalText, setGoalText] = useState('');
   const [editingGoal, setEditingGoal] = useState(false);
@@ -50,6 +59,10 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
   const [editTargetDays, setEditTargetDays] = useState('30');
   const [editStartDate, setEditStartDate] = useState('');
   const [editMeals, setEditMeals] = useState<Meal[]>(plan1);
+  const [rewardName, setRewardName] = useState('');
+  const [rewardPhoto, setRewardPhoto] = useState('');
+  const [showRewardModal, setShowRewardModal] = useState(false);
+  const [rewardNameDraft, setRewardNameDraft] = useState('');
 
   useEffect(() => {
     const loadDashboardData = async () => {
@@ -61,6 +74,8 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
         startRaw,
         todayTickRaw,
         mealPlanRaw,
+        rewardNameRaw,
+        rewardPhotoRaw,
       ] = await Promise.all([
         AsyncStorage.getItem('user_name'),
         AsyncStorage.getItem('user_goal'),
@@ -69,6 +84,8 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
         AsyncStorage.getItem('plan_start_date'),
         AsyncStorage.getItem(TICK_STORAGE_KEY),
         AsyncStorage.getItem(MEAL_PLAN_STORAGE_KEY),
+        AsyncStorage.getItem(REWARD_NAME_STORAGE_KEY),
+        AsyncStorage.getItem(REWARD_PHOTO_STORAGE_KEY),
       ]);
 
       setUserName(userNameRaw?.trim() || 'friend');
@@ -115,10 +132,39 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
       } catch {
         setMealsDoneToday(0);
       }
+
+      setRewardName(rewardNameRaw?.trim() || '');
+      setRewardPhoto(rewardPhotoRaw?.trim() || '');
     };
 
     void loadDashboardData();
   }, [refreshKey]);
+
+  useEffect(() => {
+    if (autoPlayRef.current) {
+      clearInterval(autoPlayRef.current);
+      autoPlayRef.current = null;
+    }
+    if (visionPhotos.length <= 1) return;
+
+    autoPlayRef.current = setInterval(() => {
+      setVisionIndex((prev) => {
+        const next = (prev + 1) % visionPhotos.length;
+        visionScrollRef.current?.scrollTo({
+          x: next * (visionCardWidth + visionCardGap),
+          animated: true,
+        });
+        return next;
+      });
+    }, 2000);
+
+    return () => {
+      if (autoPlayRef.current) {
+        clearInterval(autoPlayRef.current);
+        autoPlayRef.current = null;
+      }
+    };
+  }, [visionPhotos.length, visionCardWidth, visionCardGap]);
 
   const dayCounter = useMemo(() => {
     if (!planStartDate) {
@@ -257,6 +303,54 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
     setShowEditPlanModal(false);
   };
 
+  const dayProgress = useMemo(() => {
+    const percent = Math.min(100, Math.max(0, Math.round((dayCounter / Math.max(1, targetDays)) * 100)));
+    return percent;
+  }, [dayCounter, targetDays]);
+
+  const openRewardModal = () => {
+    setRewardNameDraft(rewardName);
+    setShowRewardModal(true);
+  };
+
+  const pickRewardPhoto = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (permission.status !== 'granted') {
+      Alert.alert('Photo access needed', 'Please enable Photos permission in Settings to add reward photo.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.85,
+    });
+
+    if (result.canceled || !result.assets?.length) return;
+    const uri = result.assets[0]?.uri;
+    if (!uri) return;
+    setRewardPhoto(uri);
+  };
+
+  const saveReward = async () => {
+    const nextName = rewardNameDraft.trim();
+    setRewardName(nextName);
+    await AsyncStorage.multiSet([
+      [REWARD_NAME_STORAGE_KEY, nextName],
+      [REWARD_PHOTO_STORAGE_KEY, rewardPhoto],
+    ]);
+    setShowRewardModal(false);
+  };
+
+  const resetOnboarding = async () => {
+    await AsyncStorage.removeItem('onboarding_complete');
+    try {
+      DevSettings.reload();
+    } catch {
+      Alert.alert('Reset complete', 'Onboarding has been reset. Please restart the app.');
+    }
+  };
+
   return (
     <View style={styles.screen}>
       <Text style={styles.greeting}>Hey {userName}! 👋</Text>
@@ -356,7 +450,29 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
         )}
       </View>
 
-      <View style={styles.dayCounterRow}>
+      <Pressable style={styles.rewardSection} onPress={openRewardModal}>
+        <Text style={styles.rewardTitle}>🎯 Your Reward</Text>
+        <Text style={styles.rewardNameText}>
+          {rewardName ? rewardName : 'Tap to set your reward →'}
+        </Text>
+        <View style={styles.rewardProgressWrap}>
+          <View style={styles.rewardTrack}>
+            <View style={[styles.rewardFill, { width: `${dayProgress}%` }]} />
+          </View>
+          <View style={styles.rewardEndMarker}>
+            {rewardPhoto ? (
+              <Image source={{ uri: rewardPhoto }} style={styles.rewardImage} />
+            ) : (
+              <Text style={styles.rewardEmoji}>🎁</Text>
+            )}
+          </View>
+        </View>
+        <Text style={styles.rewardMeta}>
+          {dayCounter} of {targetDays} days · {dayProgress}% there
+        </Text>
+      </Pressable>
+
+      <View style={[styles.dayCounterRow, styles.dayCounterAboveTiles]}>
         <Text style={styles.dayCounter}>Day {dayCounter} of {targetDays}</Text>
         <Pressable style={styles.editButton} onPress={openEditPlanModal}>
           <Text style={styles.editIcon}>✏️</Text>
@@ -387,7 +503,43 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
         <Pressable style={styles.startButton} onPress={onStartToday}>
           <Text style={styles.startButtonText}>Update Today {'\u2192'}</Text>
         </Pressable>
+        <Pressable style={styles.resetLinkWrap} onPress={() => void resetOnboarding()}>
+          <Text style={styles.resetLinkText}>Reset Onboarding</Text>
+        </Pressable>
       </View>
+
+      <Modal
+        visible={showRewardModal}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowRewardModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Set your reward</Text>
+            <TextInput
+              value={rewardNameDraft}
+              onChangeText={setRewardNameDraft}
+              placeholder="Reward name"
+              placeholderTextColor="#9CA3AF"
+              style={styles.modalInput}
+            />
+            <Pressable style={styles.rewardPickButton} onPress={() => void pickRewardPhoto()}>
+              <Text style={styles.rewardPickButtonText}>
+                {rewardPhoto ? 'Change reward photo' : 'Pick reward photo'}
+              </Text>
+            </Pressable>
+            <View style={styles.modalActions}>
+              <Pressable style={styles.cancelButton} onPress={() => setShowRewardModal(false)}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={styles.saveButton} onPress={() => void saveReward()}>
+                <Text style={styles.saveButtonText}>Save</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={showEditPlanModal}
@@ -463,37 +615,37 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#F5FBF8',
+    backgroundColor: BG,
     paddingTop: 64,
     paddingHorizontal: 16,
   },
   greeting: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#0F172A',
+    color: TEXT_PRIMARY,
     marginBottom: 4,
   },
   goalHeadline: {
     flex: 1,
     fontSize: 20,
     fontWeight: '700',
-    color: '#14532D',
+    color: TEXT_PRIMARY,
   },
   goalRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 28,
     gap: 8,
   },
   goalInput: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: SURFACE,
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: '#3F3F3F',
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    color: '#111827',
+    color: TEXT_PRIMARY,
     fontWeight: '600',
     fontSize: 16,
   },
@@ -502,14 +654,14 @@ const styles = StyleSheet.create({
     height: 30,
     borderRadius: 15,
     borderWidth: 1,
-    borderColor: '#D1D5DB',
-    backgroundColor: '#F9FAFB',
+    borderColor: '#3F3F3F',
+    backgroundColor: SURFACE,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 8,
   },
   editButtonText: {
-    color: '#6B7280',
+    color: TEXT_SECONDARY,
     fontSize: 12,
     fontWeight: '700',
   },
@@ -519,11 +671,11 @@ const styles = StyleSheet.create({
   visionWrap: {
     borderRadius: 16,
     overflow: 'visible',
-    backgroundColor: '#E7F6F1',
+    backgroundColor: SURFACE,
     borderWidth: 1,
-    borderColor: '#D1FAE5',
+    borderColor: '#3F3F3F',
     minHeight: 150,
-    marginBottom: 14,
+    marginBottom: 28,
   },
   visionEditButton: {
     position: 'absolute',
@@ -534,8 +686,8 @@ const styles = StyleSheet.create({
     height: 30,
     borderRadius: 15,
     borderWidth: 1,
-    borderColor: '#D1D5DB',
-    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderColor: '#3F3F3F',
+    backgroundColor: SURFACE,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -546,7 +698,7 @@ const styles = StyleSheet.create({
   },
   visionCard: {
     borderRadius: 16,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: SURFACE,
     shadowColor: '#000',
     shadowOpacity: 0.12,
     shadowRadius: 8,
@@ -563,7 +715,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 18,
-    backgroundColor: '#E5E7EB',
+    backgroundColor: SURFACE,
     borderRadius: 16,
     margin: 10,
   },
@@ -572,7 +724,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   placeholderText: {
-    color: '#4B5563',
+    color: TEXT_SECONDARY,
     textAlign: 'center',
     fontSize: 14,
   },
@@ -587,7 +739,7 @@ const styles = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 999,
-    backgroundColor: '#D1D5DB',
+    backgroundColor: '#4B5563',
   },
   dotActive: {
     width: 18,
@@ -599,7 +751,7 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: 'rgba(255,255,255,0.88)',
+    backgroundColor: SURFACE,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -611,12 +763,12 @@ const styles = StyleSheet.create({
   },
   chevronText: {
     fontSize: 18,
-    color: '#4B5563',
+    color: TEXT_PRIMARY,
     lineHeight: 20,
   },
   dayCounter: {
     fontSize: 18,
-    color: '#065F46',
+    color: TEXT_PRIMARY,
     fontWeight: '700',
     marginBottom: 14,
   },
@@ -624,38 +776,107 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 12,
+  },
+  dayCounterAboveTiles: {
+    marginTop: 24,
+    marginBottom: 28,
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#111827',
+    color: TEXT_PRIMARY,
     marginBottom: 10,
   },
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 8,
+    marginBottom: 28,
+  },
+  rewardSection: {
+    backgroundColor: SURFACE,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#3F3F3F',
+    padding: 12,
+    marginBottom: 28,
+  },
+  rewardTitle: {
+    color: ACCENT,
+    fontSize: 18,
+    fontWeight: '800',
+    marginBottom: 6,
+  },
+  rewardNameText: {
+    color: TEXT_PRIMARY,
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 10,
+  },
+  rewardProgressWrap: {
+    position: 'relative',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  rewardTrack: {
+    height: 12,
+    borderRadius: 999,
+    backgroundColor: SURFACE,
+    borderWidth: 1,
+    borderColor: '#3F3F3F',
+    overflow: 'hidden',
+    paddingRight: 56,
+  },
+  rewardFill: {
+    height: '100%',
+    backgroundColor: ACCENT,
+  },
+  rewardEndMarker: {
+    position: 'absolute',
+    right: 0,
+    top: -34,
+    width: 80,
+    height: 80,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#3F3F3F',
+    backgroundColor: SURFACE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  rewardImage: {
+    width: '100%',
+    height: '100%',
+  },
+  rewardEmoji: {
+    fontSize: 22,
+  },
+  rewardMeta: {
+    color: TEXT_SECONDARY,
+    fontSize: 12,
+    fontWeight: '700',
   },
   statCard: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: SURFACE,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#3F3F3F',
     paddingVertical: 10,
     paddingHorizontal: 8,
     alignItems: 'center',
   },
   statLabel: {
     fontSize: 11,
-    color: '#6B7280',
+    color: TEXT_SECONDARY,
     marginBottom: 4,
   },
   statValue: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#111827',
+    color: TEXT_PRIMARY,
     textAlign: 'center',
   },
   bottomArea: {
@@ -671,9 +892,32 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   startButtonText: {
-    color: '#FFFFFF',
+    color: TEXT_PRIMARY,
     fontSize: 18,
     fontWeight: '800',
+  },
+  resetLinkWrap: {
+    marginTop: 12,
+    alignSelf: 'center',
+  },
+  resetLinkText: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  rewardPickButton: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#3F3F3F',
+    backgroundColor: SURFACE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    marginBottom: 10,
+  },
+  rewardPickButtonText: {
+    color: TEXT_SECONDARY,
+    fontWeight: '700',
   },
   modalOverlay: {
     flex: 1,
@@ -681,7 +925,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: BG,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
     paddingHorizontal: 16,
@@ -692,11 +936,11 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#111827',
+    color: TEXT_PRIMARY,
     marginBottom: 10,
   },
   modalLabel: {
-    color: '#374151',
+    color: TEXT_SECONDARY,
     fontWeight: '600',
     fontSize: 13,
     marginBottom: 6,
@@ -704,28 +948,28 @@ const styles = StyleSheet.create({
   },
   modalInput: {
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: '#3F3F3F',
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    color: '#111827',
+    color: TEXT_PRIMARY,
     marginBottom: 10,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: SURFACE,
   },
   modalSectionTitle: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#111827',
+    color: TEXT_PRIMARY,
     marginTop: 6,
     marginBottom: 8,
   },
   editMealCard: {
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#3F3F3F',
     borderRadius: 12,
     padding: 10,
     marginBottom: 10,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: SURFACE,
   },
   modalTextarea: {
     minHeight: 64,
@@ -741,14 +985,14 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: '#3F3F3F',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: SURFACE,
   },
   cancelButtonText: {
-    color: '#4B5563',
+    color: TEXT_SECONDARY,
     fontWeight: '700',
   },
   saveButton: {
@@ -760,7 +1004,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   saveButtonText: {
-    color: '#FFFFFF',
+    color: TEXT_PRIMARY,
     fontWeight: '800',
   },
 });

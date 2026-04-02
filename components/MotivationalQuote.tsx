@@ -2,7 +2,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
-const ACCENT = '#1D9E75';
+const ACCENT = '#D85A30';
 
 export const motivationalQuotes = [
   'Fat loss happens between meals. Every time you skip the snack, your body gets to work.',
@@ -42,7 +42,7 @@ export default function MotivationalQuote({ visible, quote, onDismiss }: Props) 
       presentationStyle="fullScreen"
       statusBarTranslucent
     >
-      <LinearGradient colors={[ACCENT, '#168264', '#0F6A52']} style={styles.overlay}>
+      <LinearGradient colors={['#1A1A1A', '#1A1A1A']} style={styles.overlay}>
         <View style={styles.decorCircleTop} />
         <View style={styles.decorCircleBottom} />
 
@@ -87,14 +87,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   button: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: ACCENT,
     borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   buttonText: {
-    color: '#0F6A52',
+    color: '#FFFFFF',
     fontSize: 17,
     fontWeight: '800',
   },
@@ -105,7 +105,7 @@ const styles = StyleSheet.create({
     width: 190,
     height: 190,
     borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(216,90,48,0.18)',
   },
   decorCircleBottom: {
     position: 'absolute',
@@ -114,7 +114,7 @@ const styles = StyleSheet.create({
     width: 210,
     height: 210,
     borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(216,90,48,0.20)',
   },
 });
 
