@@ -4,6 +4,8 @@ import React, { useMemo, useState } from 'react';
 import {
   Alert,
   Image,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -167,7 +169,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
         <View style={styles.centerStep}>
           <Text style={styles.appName}>Nutrition Companion</Text>
           <Text style={styles.tagline}>Built around your why.</Text>
-          <Pressable style={styles.primaryButton} onPress={goNext}>
+          <Pressable style={styles.letsGetStartedButton} onPress={goNext}>
             <Text style={styles.primaryButtonText}>Let&apos;s get started</Text>
           </Pressable>
         </View>
@@ -434,7 +436,6 @@ export default function OnboardingScreen({ onComplete }: Props) {
                   >
                     <Text style={styles.emojiText}>{effectiveEmoji}</Text>
                   </Pressable>
-                  <Text style={styles.optionalText}>optional</Text>
                 </View>
 
                 <TextInput
@@ -444,7 +445,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
                       prev.map((m, i) => (i === idx ? { ...m, time: v } : m))
                     )
                   }
-                  placeholder="e.g. 9:15am"
+                  placeholder="Time — e.g. 9:15am"
                   placeholderTextColor="#9CA3AF"
                   style={[styles.input, styles.timeInput, missingTime && styles.inputError]}
                 />
@@ -457,7 +458,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
                     prev.map((m, i) => (i === idx ? { ...m, name: v } : m))
                   )
                 }
-                placeholder="e.g. Breakfast"
+                placeholder="Meal Name — e.g. Breakfast"
                 placeholderTextColor="#9CA3AF"
                 style={[styles.input, missingName && styles.inputError]}
               />
@@ -469,7 +470,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
                     prev.map((m, i) => (i === idx ? { ...m, details: v } : m))
                   )
                 }
-                placeholder="e.g. 2 eggs, sourdough toast (optional)"
+                placeholder="Details — e.g. 2 eggs, toast... (optional)"
                 placeholderTextColor="#9CA3AF"
                 style={[styles.input, styles.detailsInput]}
                 multiline
@@ -511,25 +512,50 @@ export default function OnboardingScreen({ onComplete }: Props) {
     );
   };
 
+  const topBar =
+    step > 0 ? (
+      <View style={styles.topBar}>
+        <Pressable onPress={goBack}>
+          <Text style={styles.backText}>Back</Text>
+        </Pressable>
+        <Text style={styles.stepText}>
+          {step + 1}/8
+        </Text>
+      </View>
+    ) : null;
+
+  const scrollBody = (
+    <>
+      {topBar}
+      {renderStep()}
+    </>
+  );
+
   return (
     <SafeAreaView style={styles.screen}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        {step > 0 ? (
-          <View style={styles.topBar}>
-            <Pressable onPress={goBack}>
-              <Text style={styles.backText}>Back</Text>
-            </Pressable>
-            <Text style={styles.stepText}>
-              {step + 1}/8
-            </Text>
-          </View>
-        ) : null}
-        {renderStep()}
-      </ScrollView>
+      {step === 7 ? (
+        <KeyboardAvoidingView
+          style={styles.keyboardAvoidingFill}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <ScrollView
+            style={styles.scrollFill}
+            contentContainerStyle={[styles.content, styles.mealPlanScrollBottom]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {scrollBody}
+          </ScrollView>
+        </KeyboardAvoidingView>
+      ) : (
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {scrollBody}
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -544,6 +570,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 20,
     paddingBottom: 32,
+  },
+  mealPlanScrollBottom: {
+    paddingBottom: 300,
+  },
+  keyboardAvoidingFill: {
+    flex: 1,
+  },
+  scrollFill: {
+    flex: 1,
   },
   topBar: {
     flexDirection: 'row',
@@ -616,6 +651,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 14,
+  },
+  letsGetStartedButton: {
+    marginTop: 6,
+    width: '100%',
+    alignSelf: 'stretch',
+    backgroundColor: ACCENT,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 48,
   },
   primaryButtonText: {
     color: '#FFFFFF',
@@ -728,12 +774,6 @@ const styles = StyleSheet.create({
   },
   emojiText: {
     fontSize: 16,
-  },
-  optionalText: {
-    marginTop: 4,
-    fontSize: 11,
-    color: '#9CA3AF',
-    textAlign: 'center',
   },
   row1: {
     flexDirection: 'row',

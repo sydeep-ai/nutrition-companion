@@ -26,6 +26,8 @@ const TICK_STORAGE_KEY = 'today_tick_state_v1';
 const MEAL_PLAN_STORAGE_KEY = 'meal_plan';
 const REWARD_NAME_STORAGE_KEY = 'reward_name';
 const REWARD_PHOTO_STORAGE_KEY = 'reward_photo';
+const VISION_PHOTOS_KEY = 'vision_photos';
+const VISION_SLOTS = 5;
 
 type Props = {
   onStartToday: () => void;
@@ -38,6 +40,36 @@ type TickState = {
 };
 
 const getTodayKey = () => new Date().toISOString().slice(0, 10);
+
+type VisionBoardSlotProps = {
+  uri: string;
+  size: number;
+  onPick: () => void;
+  onDelete: () => void;
+};
+
+function VisionBoardSlot({ uri, size, onPick, onDelete }: VisionBoardSlotProps) {
+  const slotFrame = [styles.visionBoardSlotFrame, { width: size, height: size }];
+  if (uri) {
+    return (
+      <View style={slotFrame}>
+        <Image source={{ uri }} style={styles.visionBoardSlotImage} />
+        <Pressable
+          style={styles.visionBoardDeleteBtn}
+          onPress={onDelete}
+          hitSlop={6}
+        >
+          <Text style={styles.visionBoardDeleteEmoji}>🗑️</Text>
+        </Pressable>
+      </View>
+    );
+  }
+  return (
+    <Pressable style={[slotFrame, styles.visionBoardSlotEmpty]} onPress={onPick}>
+      <Text style={styles.visionBoardPlus}>+</Text>
+    </Pressable>
+  );
+}
 
 export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props) {
   const screenWidth = Dimensions.get('window').width;
@@ -63,6 +95,10 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
   const [rewardPhoto, setRewardPhoto] = useState('');
   const [showRewardModal, setShowRewardModal] = useState(false);
   const [rewardNameDraft, setRewardNameDraft] = useState('');
+  const [showVisionBoardModal, setShowVisionBoardModal] = useState(false);
+  const [visionEditSlots, setVisionEditSlots] = useState<string[]>(() =>
+    Array.from({ length: VISION_SLOTS }, () => '')
+  );
 
   useEffect(() => {
     const loadDashboardData = async () => {
@@ -79,7 +115,7 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
       ] = await Promise.all([
         AsyncStorage.getItem('user_name'),
         AsyncStorage.getItem('user_goal'),
-        AsyncStorage.getItem('vision_photos'),
+        AsyncStorage.getItem(VISION_PHOTOS_KEY),
         AsyncStorage.getItem('target_days'),
         AsyncStorage.getItem('plan_start_date'),
         AsyncStorage.getItem(TICK_STORAGE_KEY),
@@ -223,12 +259,38 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
     await AsyncStorage.setItem('user_goal', nextGoal);
   };
 
-  const editVisionPhotos = async () => {
+  const padVisionSlotsFromStorage = (raw: string | null): string[] => {
+    let arr: string[] = [];
+    try {
+      arr = raw ? (JSON.parse(raw) as string[]) : [];
+      if (!Array.isArray(arr)) arr = [];
+    } catch {
+      arr = [];
+    }
+    return Array.from({ length: VISION_SLOTS }, (_, i) => (arr[i] || '').trim());
+  };
+
+  const persistVisionSlots = async (slots: string[]) => {
+    const normalized = Array.from({ length: VISION_SLOTS }, (_, i) => (slots[i] || '').trim());
+    const filtered = normalized.filter(Boolean);
+    setVisionEditSlots(normalized);
+    setVisionPhotos(filtered);
+    setVisionIndex((prev) => (filtered.length === 0 ? 0 : Math.min(prev, filtered.length - 1)));
+    await AsyncStorage.setItem(VISION_PHOTOS_KEY, JSON.stringify(filtered));
+  };
+
+  const openVisionBoardModal = async () => {
+    const visionRaw = await AsyncStorage.getItem(VISION_PHOTOS_KEY);
+    setVisionEditSlots(padVisionSlotsFromStorage(visionRaw));
+    setShowVisionBoardModal(true);
+  };
+
+  const pickVisionSlot = async (slotIndex: number) => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (permission.status !== 'granted') {
       Alert.alert(
         'Photo access needed',
-        'Please enable Photos permission in Settings to update your vision board.'
+        'Please enable Photos permission in Settings to add vision images.'
       );
       return;
     }
@@ -236,24 +298,30 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: false,
-      allowsMultipleSelection: true,
       quality: 0.8,
     });
 
-    if (result.canceled || !result.assets?.length) {
-      return;
-    }
+    if (result.canceled || !result.assets?.length) return;
+    const uri = result.assets[0]?.uri;
+    if (!uri) return;
 
-    const selectedUris = result.assets.map((asset) => asset.uri).filter(Boolean);
-    if (!selectedUris.length) {
-      return;
-    }
-
-    // Replace the current set with selected photos.
-    setVisionPhotos(selectedUris);
-    setVisionIndex(0);
-    await AsyncStorage.setItem('vision_photos', JSON.stringify(selectedUris));
+    const next = [...visionEditSlots];
+    next[slotIndex] = uri;
+    await persistVisionSlots(next);
   };
+
+  const deleteVisionSlot = (slotIndex: number) => {
+    const next = [...visionEditSlots];
+    next[slotIndex] = '';
+    void persistVisionSlots(next);
+  };
+
+  const visionModalSlotSide = useMemo(() => {
+    const w = Dimensions.get('window').width;
+    const pad = 16;
+    const gap = 10;
+    return (w - pad * 2 - gap) / 2;
+  }, [screenWidth]);
 
   const scrollToVisionIndex = (index: number) => {
     const bounded = Math.max(0, Math.min(index, Math.max(visionPhotos.length - 1, 0)));
@@ -387,7 +455,10 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
       </View>
 
       <View style={styles.visionWrap}>
-        <Pressable style={styles.visionEditButton} onPress={() => void editVisionPhotos()}>
+        <Pressable
+          style={[styles.editButton, styles.visionEditButtonOverlay]}
+          onPress={() => void openVisionBoardModal()}
+        >
           <Text style={styles.editIcon}>✏️</Text>
         </Pressable>
         {visionPhotos.length > 0 ? (
@@ -472,41 +543,100 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
         </Text>
       </Pressable>
 
-      <View style={[styles.dayCounterRow, styles.dayCounterAboveTiles]}>
-        <Text style={styles.dayCounter}>Day {dayCounter} of {targetDays}</Text>
-        <Pressable style={styles.editButton} onPress={openEditPlanModal}>
-          <Text style={styles.editIcon}>✏️</Text>
-        </Pressable>
-      </View>
+      <ScrollView
+        style={styles.bottomScroll}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.bottomScrollContent}
+      >
+        <View style={[styles.dayCounterRow, styles.dayCounterAboveTiles]}>
+          <Text style={styles.dayCounter}>Day {dayCounter} of {targetDays}</Text>
+          <Pressable style={styles.editButton} onPress={openEditPlanModal}>
+            <Text style={styles.editIcon}>✏️</Text>
+          </Pressable>
+        </View>
 
-      <Text style={styles.sectionTitle}>Today at a glance</Text>
-      <View style={styles.statsRow}>
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>🍽️</Text>
-          <Text style={styles.statValue}>{mealsDoneToday}/6</Text>
+        <Text style={styles.sectionTitle}>Today at a glance</Text>
+        <View style={styles.statsRow}>
+          <View style={styles.statCard}>
+            <Text style={styles.statLabel}>🍽️</Text>
+            <Text style={styles.statValue}>{mealsDoneToday}/6</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statLabel}>💧</Text>
+            <Text style={styles.statValue}>0/8</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statLabel}>💊</Text>
+            <Text style={styles.statValue}>not yet</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statLabel}>🔥</Text>
+            <Text style={styles.statValue}>🔥 Day 1</Text>
+          </View>
         </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>💧</Text>
-          <Text style={styles.statValue}>0/8</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>💊</Text>
-          <Text style={styles.statValue}>not yet</Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>🔥</Text>
-          <Text style={styles.statValue}>🔥 Day 1</Text>
-        </View>
-      </View>
 
-      <View style={styles.bottomArea}>
-        <Pressable style={styles.startButton} onPress={onStartToday}>
-          <Text style={styles.startButtonText}>Update Today {'\u2192'}</Text>
-        </Pressable>
-        <Pressable style={styles.resetLinkWrap} onPress={() => void resetOnboarding()}>
-          <Text style={styles.resetLinkText}>Reset Onboarding</Text>
-        </Pressable>
-      </View>
+        <View style={styles.bottomArea}>
+          <Pressable style={styles.startButton} onPress={onStartToday}>
+            <Text style={styles.startButtonText}>Update Today {'\u2192'}</Text>
+          </Pressable>
+          <Pressable style={styles.resetLinkWrap} onPress={() => void resetOnboarding()}>
+            <Text style={styles.resetLinkText}>Reset Onboarding</Text>
+          </Pressable>
+        </View>
+      </ScrollView>
+
+      <Modal
+        visible={showVisionBoardModal}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setShowVisionBoardModal(false)}
+      >
+        <View style={styles.visionBoardModalRoot}>
+          <Text style={styles.visionBoardModalTitle}>Your Vision Board</Text>
+          <ScrollView
+            style={styles.visionBoardModalScroll}
+            contentContainerStyle={styles.visionBoardModalScrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.visionBoardRow}>
+              {[0, 1].map((i) => (
+                <VisionBoardSlot
+                  key={`vslot-${i}`}
+                  uri={visionEditSlots[i]}
+                  size={visionModalSlotSide}
+                  onPick={() => void pickVisionSlot(i)}
+                  onDelete={() => deleteVisionSlot(i)}
+                />
+              ))}
+            </View>
+            <View style={styles.visionBoardRow}>
+              {[2, 3].map((i) => (
+                <VisionBoardSlot
+                  key={`vslot-${i}`}
+                  uri={visionEditSlots[i]}
+                  size={visionModalSlotSide}
+                  onPick={() => void pickVisionSlot(i)}
+                  onDelete={() => deleteVisionSlot(i)}
+                />
+              ))}
+            </View>
+            <View style={styles.visionBoardRowSingle}>
+              <VisionBoardSlot
+                uri={visionEditSlots[4]}
+                size={visionModalSlotSide}
+                onPick={() => void pickVisionSlot(4)}
+                onDelete={() => deleteVisionSlot(4)}
+              />
+            </View>
+          </ScrollView>
+          <Pressable
+            style={styles.visionBoardDoneButton}
+            onPress={() => setShowVisionBoardModal(false)}
+          >
+            <Text style={styles.visionBoardDoneButtonText}>Done</Text>
+          </Pressable>
+        </View>
+      </Modal>
 
       <Modal
         visible={showRewardModal}
@@ -627,7 +757,7 @@ const styles = StyleSheet.create({
   },
   goalHeadline: {
     flex: 1,
-    fontSize: 20,
+    fontSize: 21,
     fontWeight: '700',
     color: TEXT_PRIMARY,
   },
@@ -677,19 +807,11 @@ const styles = StyleSheet.create({
     minHeight: 150,
     marginBottom: 28,
   },
-  visionEditButton: {
+  visionEditButtonOverlay: {
     position: 'absolute',
     zIndex: 10,
     top: 8,
     right: 8,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: '#3F3F3F',
-    backgroundColor: SURFACE,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   visionPhoto: {
     width: '100%',
@@ -767,10 +889,10 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   dayCounter: {
-    fontSize: 18,
+    fontSize: 21,
     color: TEXT_PRIMARY,
     fontWeight: '700',
-    marginBottom: 14,
+    marginBottom: 0,
   },
   dayCounterRow: {
     flexDirection: 'row',
@@ -779,38 +901,47 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   dayCounterAboveTiles: {
-    marginTop: 24,
-    marginBottom: 28,
+    marginTop: 16,
+    marginBottom: 0,
+  },
+  bottomScroll: {
+    flex: 1,
+  },
+  bottomScrollContent: {
+    flexGrow: 1,
+    paddingBottom: 32,
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '700',
     color: TEXT_PRIMARY,
-    marginBottom: 10,
+    marginBottom: 0,
   },
   statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 8,
-    marginBottom: 28,
+    marginTop: 12,
+    marginBottom: 16,
   },
   rewardSection: {
     backgroundColor: SURFACE,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: '#3F3F3F',
-    padding: 12,
-    marginBottom: 28,
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+    marginBottom: 0,
   },
   rewardTitle: {
     color: ACCENT,
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 21,
+    fontWeight: '700',
     marginBottom: 6,
   },
   rewardNameText: {
-    color: TEXT_PRIMARY,
-    fontSize: 14,
+    color: '#FAFAFA',
+    fontSize: 19,
     fontWeight: '700',
     marginBottom: 10,
   },
@@ -820,7 +951,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   rewardTrack: {
-    height: 12,
+    height: 14,
     borderRadius: 999,
     backgroundColor: SURFACE,
     borderWidth: 1,
@@ -855,7 +986,7 @@ const styles = StyleSheet.create({
   },
   rewardMeta: {
     color: TEXT_SECONDARY,
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '700',
   },
   statCard: {
@@ -880,8 +1011,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   bottomArea: {
-    marginTop: 'auto',
-    paddingBottom: 26,
+    marginTop: 0,
+    paddingBottom: 0,
   },
   startButton: {
     width: '100%',
@@ -899,11 +1030,90 @@ const styles = StyleSheet.create({
   resetLinkWrap: {
     marginTop: 12,
     alignSelf: 'center',
+    marginBottom: 0,
   },
   resetLinkText: {
     color: '#9CA3AF',
     fontSize: 12,
     fontWeight: '600',
+  },
+  visionBoardModalRoot: {
+    flex: 1,
+    backgroundColor: BG,
+    paddingTop: 56,
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+  },
+  visionBoardModalTitle: {
+    color: TEXT_PRIMARY,
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  visionBoardModalScroll: {
+    flex: 1,
+  },
+  visionBoardModalScrollContent: {
+    paddingBottom: 16,
+  },
+  visionBoardRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  visionBoardRowSingle: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  visionBoardSlotFrame: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#3F3F3F',
+    overflow: 'hidden',
+    backgroundColor: SURFACE,
+  },
+  visionBoardSlotEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: SURFACE,
+  },
+  visionBoardSlotImage: {
+    width: '100%',
+    height: '100%',
+  },
+  visionBoardPlus: {
+    fontSize: 32,
+    color: '#9CA3AF',
+    fontWeight: '300',
+    lineHeight: 34,
+  },
+  visionBoardDeleteBtn: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#DC2626',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  visionBoardDeleteEmoji: {
+    fontSize: 11,
+  },
+  visionBoardDoneButton: {
+    marginTop: 8,
+    borderRadius: 14,
+    backgroundColor: ACCENT,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  visionBoardDoneButtonText: {
+    color: TEXT_PRIMARY,
+    fontSize: 17,
+    fontWeight: '800',
   },
   rewardPickButton: {
     borderRadius: 10,
