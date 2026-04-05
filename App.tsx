@@ -5,11 +5,14 @@ import TodayScreen from './app/index';
 import OnboardingScreen from './app/onboarding';
 import MotivationalQuote, { motivationalQuotes } from './components/MotivationalQuote';
 import DashboardScreen from './app/dashboard';
+import HistoryScreen from './app/history';
 import { scheduleAllNotifications } from './services/notifications';
 
 export default function App() {
   const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null);
-  const [activeScreen, setActiveScreen] = useState<'dashboard' | 'today'>('dashboard');
+  const [activeScreen, setActiveScreen] = useState<'dashboard' | 'today' | 'history'>(
+    'dashboard'
+  );
   const [showDailyQuote, setShowDailyQuote] = useState(false);
   const [dailyQuote, setDailyQuote] = useState('');
 
@@ -64,7 +67,12 @@ export default function App() {
       {onboardingComplete ? (
         <>
           {activeScreen === 'dashboard' ? (
-            <DashboardScreen onStartToday={() => setActiveScreen('today')} />
+            <DashboardScreen
+              onStartToday={() => setActiveScreen('today')}
+              onOpenHistory={() => setActiveScreen('history')}
+            />
+          ) : activeScreen === 'history' ? (
+            <HistoryScreen onBack={() => setActiveScreen('dashboard')} />
           ) : (
             <TodayScreen onPressHome={() => setActiveScreen('dashboard')} />
           )}

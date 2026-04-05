@@ -2,11 +2,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActionSheetIOS,
   Alert,
   DevSettings,
   Dimensions,
   Image,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,7 +16,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Meal, plan1 } from '../data/plan1';
+import {
+  DEFAULT_MEAL_PLAN,
+  parseMealPlanFromStorage,
+  PlanMeal,
+} from '../data/defaultMealPlan';
+import { calculateStreak, parseMealTicks } from '../services/storage';
 
 const ACCENT = '#D85A30';
 const SURFACE = '#2E2E2E';
@@ -22,24 +29,153 @@ const BG = '#1A1A1A';
 const TEXT_PRIMARY = '#FAFAFA';
 const TEXT_SECONDARY = '#F0997B';
 const COMPLETION = '#1D9E75';
-const TICK_STORAGE_KEY = 'today_tick_state_v1';
 const MEAL_PLAN_STORAGE_KEY = 'meal_plan';
+const TRACKING_CONFIG_KEY = 'tracking_config';
+const STEPS_GOAL_KEY = 'steps_goal';
+const WORKOUT_LABEL_KEY = 'workout_label';
+const WATER_GOAL_KEY = 'water_goal';
+const SUPPLEMENT_LIST_KEY = 'supplement_list';
+const CUSTOM_ITEMS_KEY = 'custom_items';
+
+const TRACKING_ORDER = [
+  'meals',
+  'steps',
+  'workout',
+  'water',
+  'supplements',
+  'custom',
+] as const;
+
+type TrackingId = (typeof TRACKING_ORDER)[number];
+
+const TRACKING_GRID_ITEMS: { id: TrackingId; emoji: string; label: string }[] = [
+  { id: 'meals', emoji: '🍽️', label: 'Meals' },
+  { id: 'steps', emoji: '👟', label: 'Steps' },
+  { id: 'workout', emoji: '💪', label: 'Workout' },
+  { id: 'water', emoji: '💧', label: 'Water' },
+  { id: 'supplements', emoji: '💊', label: 'Supplements' },
+  { id: 'custom', emoji: '⭐', label: 'Custom' },
+];
+
+const CUSTOM_ITEM_EMOJI_CYCLE = ['⭐', '🧘', '🚴', '📚', '🎯', '🌿'] as const;
+
+type SupplementRow = { name: string; timing: string };
+type CustomItemRow = { label: string; emoji: string };
+
+function isTrackingId(s: string): s is TrackingId {
+  return (TRACKING_ORDER as readonly string[]).includes(s);
+}
+
+function parseTrackingConfigForEdit(raw: string | null): TrackingId[] {
+  if (raw === null || raw === undefined) {
+    return ['meals'];
+  }
+  try {
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) {
+      return ['meals'];
+    }
+    if (arr.length === 0) {
+      return [];
+    }
+    const ids = arr.filter((x): x is TrackingId => typeof x === 'string' && isTrackingId(x));
+    return TRACKING_ORDER.filter((id) => ids.includes(id));
+  } catch {
+    return ['meals'];
+  }
+}
+
 const REWARD_NAME_STORAGE_KEY = 'reward_name';
 const REWARD_PHOTO_STORAGE_KEY = 'reward_photo';
 const VISION_PHOTOS_KEY = 'vision_photos';
 const VISION_SLOTS = 5;
 
+/** Keys cleared on full reset (plus all keys from storage and daily-data pattern matches). */
+const RESET_STATIC_KEYS: string[] = [
+  'onboarding_complete',
+  'user_name',
+  'user_goal',
+  'user_why',
+  'user_intentions',
+  VISION_PHOTOS_KEY,
+  REWARD_NAME_STORAGE_KEY,
+  REWARD_PHOTO_STORAGE_KEY,
+  'target_days',
+  'plan_start_date',
+  TRACKING_CONFIG_KEY,
+  MEAL_PLAN_STORAGE_KEY,
+  STEPS_GOAL_KEY,
+  WATER_GOAL_KEY,
+  WORKOUT_LABEL_KEY,
+  SUPPLEMENT_LIST_KEY,
+  CUSTOM_ITEMS_KEY,
+  'last_quote_date',
+];
+
+function storageKeyMatchesDailyDataPattern(key: string): boolean {
+  if (key.startsWith('meal_ticks_')) return true;
+  if (key.startsWith('journal_')) return true;
+  if (key.startsWith('checkin_')) return true;
+  if (key.startsWith('water_cups_')) return true;
+  if (key.startsWith('supplements_')) return true;
+  if (key.startsWith('movement_')) return true;
+  if (key.startsWith('steps_') && key !== STEPS_GOAL_KEY) return true;
+  if (key.startsWith('workout_') && key !== WORKOUT_LABEL_KEY) return true;
+  if (key.startsWith('custom_') && key !== CUSTOM_ITEMS_KEY) return true;
+  return false;
+}
+
 type Props = {
   onStartToday: () => void;
+  onOpenHistory: () => void;
   refreshKey?: number;
 };
 
-type TickState = {
-  date: string;
-  checkedIds: string[];
-};
-
 const getTodayKey = () => new Date().toISOString().slice(0, 10);
+
+const MEAL_TYPE_PRESETS = [
+  { emoji: '🌅', title: 'Morning Ritual' },
+  { emoji: '🍳', title: 'Breakfast' },
+  { emoji: '🥗', title: 'Lunch' },
+  { emoji: '🍎', title: 'Snack' },
+  { emoji: '🍽️', title: 'Dinner' },
+  { emoji: '💊', title: 'Supplement' },
+] as const;
+
+const CUSTOM_MEAL_EMOJI = '⭐';
+const MEAL_TYPE_DEFAULT_BUTTON_LABEL = '🍽️ Meal';
+
+function mealMatchesPreset(emoji: string, title: string): boolean {
+  return MEAL_TYPE_PRESETS.some((p) => p.emoji === emoji && p.title === title);
+}
+
+function mealTypeDropdownLabel(meal: PlanMeal): string {
+  if (!meal.title.trim()) {
+    return MEAL_TYPE_DEFAULT_BUTTON_LABEL;
+  }
+  return `${meal.emoji} ${meal.title}`.trim();
+}
+
+function parseWaterCupsDay(raw: string | null): number {
+  if (!raw) return 0;
+  try {
+    const j = JSON.parse(raw) as { cups?: number };
+    if (j && typeof j.cups === 'number' && Number.isFinite(j.cups)) {
+      return Math.max(0, Math.floor(j.cups));
+    }
+  } catch {
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) ? Math.max(0, n) : 0;
+  }
+  return 0;
+}
+
+function parseYesNoStored(raw: string | null): boolean | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  if (raw === 'yes' || raw === 'true' || raw === '1') return true;
+  if (raw === 'no' || raw === 'false' || raw === '0') return false;
+  return null;
+}
 
 type VisionBoardSlotProps = {
   uri: string;
@@ -71,7 +207,7 @@ function VisionBoardSlot({ uri, size, onPick, onDelete }: VisionBoardSlotProps) 
   );
 }
 
-export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props) {
+export default function DashboardScreen({ onStartToday, onOpenHistory, refreshKey = 0 }: Props) {
   const screenWidth = Dimensions.get('window').width;
   const visionCardWidth = Math.floor(screenWidth * 0.85);
   const visionCardGap = 10;
@@ -84,13 +220,38 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
   const [visionPhotos, setVisionPhotos] = useState<string[]>([]);
   const [targetDays, setTargetDays] = useState(30);
   const [planStartDate, setPlanStartDate] = useState<string>('');
-  const [mealsDoneToday, setMealsDoneToday] = useState(0);
+  const [dashboardTracking, setDashboardTracking] = useState<TrackingId[]>(['meals']);
+  const [glanceMealsDone, setGlanceMealsDone] = useState(0);
+  const [glanceMealsTotal, setGlanceMealsTotal] = useState(0);
+  const [glanceStepsYes, setGlanceStepsYes] = useState<boolean | null>(null);
+  const [glanceWorkoutYes, setGlanceWorkoutYes] = useState<boolean | null>(null);
+  const [glanceWaterCups, setGlanceWaterCups] = useState(0);
+  const [glanceWaterGoal, setGlanceWaterGoal] = useState(8);
+  const [glanceSupplementsOk, setGlanceSupplementsOk] = useState<boolean | null>(null);
+  const [glanceCustomOk, setGlanceCustomOk] = useState<boolean[]>([]);
+  const [glanceCustomLabels, setGlanceCustomLabels] = useState<{ emoji: string; label: string }[]>(
+    []
+  );
+  const [streakDays, setStreakDays] = useState(0);
   const [visionIndex, setVisionIndex] = useState(0);
-  const [mealPlan, setMealPlan] = useState<Meal[]>(plan1);
+  const [mealPlan, setMealPlan] = useState<PlanMeal[]>(DEFAULT_MEAL_PLAN);
   const [showEditPlanModal, setShowEditPlanModal] = useState(false);
   const [editTargetDays, setEditTargetDays] = useState('30');
   const [editStartDate, setEditStartDate] = useState('');
-  const [editMeals, setEditMeals] = useState<Meal[]>(plan1);
+  const [editMeals, setEditMeals] = useState<PlanMeal[]>(DEFAULT_MEAL_PLAN);
+  const [mealTypePickerIndex, setMealTypePickerIndex] = useState<number | null>(null);
+  const [mealTypePickerCustom, setMealTypePickerCustom] = useState(false);
+  const [mealTypeCustomDraft, setMealTypeCustomDraft] = useState('');
+  const [editTrackingSelected, setEditTrackingSelected] = useState<TrackingId[]>(['meals']);
+  const [editStepsGoal, setEditStepsGoal] = useState('10000');
+  const [editWorkoutLabel, setEditWorkoutLabel] = useState('');
+  const [editWaterGoal, setEditWaterGoal] = useState('8');
+  const [editSupplements, setEditSupplements] = useState<SupplementRow[]>([
+    { name: '', timing: '' },
+  ]);
+  const [editCustomItems, setEditCustomItems] = useState<CustomItemRow[]>([
+    { label: '', emoji: '⭐' },
+  ]);
   const [rewardName, setRewardName] = useState('');
   const [rewardPhoto, setRewardPhoto] = useState('');
   const [showRewardModal, setShowRewardModal] = useState(false);
@@ -108,7 +269,6 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
         visionRaw,
         targetRaw,
         startRaw,
-        todayTickRaw,
         mealPlanRaw,
         rewardNameRaw,
         rewardPhotoRaw,
@@ -118,7 +278,6 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
         AsyncStorage.getItem(VISION_PHOTOS_KEY),
         AsyncStorage.getItem('target_days'),
         AsyncStorage.getItem('plan_start_date'),
-        AsyncStorage.getItem(TICK_STORAGE_KEY),
         AsyncStorage.getItem(MEAL_PLAN_STORAGE_KEY),
         AsyncStorage.getItem(REWARD_NAME_STORAGE_KEY),
         AsyncStorage.getItem(REWARD_PHOTO_STORAGE_KEY),
@@ -144,30 +303,106 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
       setPlanStartDate(startRaw || '');
       setEditStartDate(formatDateForInput(startRaw || ''));
 
-      try {
-        const parsedMeals = mealPlanRaw ? (JSON.parse(mealPlanRaw) as Meal[]) : plan1;
-        if (Array.isArray(parsedMeals) && parsedMeals.length > 0) {
-          setMealPlan(parsedMeals);
-          setEditMeals(parsedMeals);
-        } else {
-          setMealPlan(plan1);
-          setEditMeals(plan1);
-        }
-      } catch {
-        setMealPlan(plan1);
-        setEditMeals(plan1);
-      }
+      const mealsNorm = parseMealPlanFromStorage(mealPlanRaw);
+      setMealPlan(mealsNorm);
 
+      const today = getTodayKey();
+      const [
+        tcRaw,
+        mealTicksRaw,
+        stepsRaw,
+        workoutRaw,
+        waterCupsRaw,
+        waterGoalRaw,
+        supListRaw,
+        supStateRaw,
+        customItemsRaw,
+      ] = await Promise.all([
+        AsyncStorage.getItem(TRACKING_CONFIG_KEY),
+        AsyncStorage.getItem(`meal_ticks_${today}`),
+        AsyncStorage.getItem(`steps_${today}`),
+        AsyncStorage.getItem(`workout_${today}`),
+        AsyncStorage.getItem(`water_cups_${today}`),
+        AsyncStorage.getItem(WATER_GOAL_KEY),
+        AsyncStorage.getItem(SUPPLEMENT_LIST_KEY),
+        AsyncStorage.getItem(`supplements_${today}`),
+        AsyncStorage.getItem(CUSTOM_ITEMS_KEY),
+      ]);
+
+      setDashboardTracking(parseTrackingConfigForEdit(tcRaw));
+
+      const ticks = parseMealTicks(mealTicksRaw);
+      const totalMeals = ticks?.total ?? Math.max(0, mealsNorm.length);
+      const rawDone = ticks?.done ?? 0;
+      setGlanceMealsTotal(totalMeals);
+      setGlanceMealsDone(Math.min(rawDone, totalMeals));
+
+      setGlanceStepsYes(parseYesNoStored(stepsRaw));
+      setGlanceWorkoutYes(parseYesNoStored(workoutRaw));
+      setGlanceWaterCups(parseWaterCupsDay(waterCupsRaw));
+      const wg = Number(waterGoalRaw);
+      setGlanceWaterGoal(
+        waterGoalRaw != null && waterGoalRaw !== '' && Number.isFinite(wg) && wg > 0
+          ? Math.floor(wg)
+          : 8
+      );
+
+      let supListParsed: SupplementRow[] = [];
       try {
-        const tick = todayTickRaw ? (JSON.parse(todayTickRaw) as TickState) : null;
-        if (tick?.date === getTodayKey() && Array.isArray(tick.checkedIds)) {
-          setMealsDoneToday(tick.checkedIds.length);
-        } else {
-          setMealsDoneToday(0);
-        }
+        const p = supListRaw ? (JSON.parse(supListRaw) as SupplementRow[]) : [];
+        supListParsed = Array.isArray(p)
+          ? p.map((r) => ({
+              name: String(r?.name ?? ''),
+              timing: String(r?.timing ?? ''),
+            }))
+          : [];
       } catch {
-        setMealsDoneToday(0);
+        supListParsed = [];
       }
+      const activeSupp = supListParsed.filter((r) => r.name.trim() || r.timing.trim());
+      let suppOk: boolean | null = null;
+      if (activeSupp.length === 0) {
+        suppOk = null;
+      } else {
+        try {
+          const doneObj = supStateRaw
+            ? (JSON.parse(supStateRaw) as Record<string, boolean>)
+            : {};
+          suppOk = activeSupp.every((_, i) => doneObj[String(i)] === true);
+        } catch {
+          suppOk = false;
+        }
+      }
+      setGlanceSupplementsOk(suppOk);
+
+      let customParsed: CustomItemRow[] = [];
+      try {
+        const c = customItemsRaw ? (JSON.parse(customItemsRaw) as CustomItemRow[]) : [];
+        customParsed = Array.isArray(c)
+          ? c.map((r) => ({
+              label: String(r?.label ?? ''),
+              emoji: String(r?.emoji ?? '⭐'),
+            }))
+          : [];
+      } catch {
+        customParsed = [];
+      }
+      setGlanceCustomLabels(customParsed);
+      const customFlags = await Promise.all(
+        customParsed.map(async (_, i) => {
+          const raw = await AsyncStorage.getItem(`custom_${i}_${today}`);
+          if (!raw) return false;
+          try {
+            const j = JSON.parse(raw) as { yes?: boolean };
+            return j?.yes === true;
+          } catch {
+            return raw === 'yes' || raw === 'true';
+          }
+        })
+      );
+      setGlanceCustomOk(customFlags);
+
+      setStreakDays(await calculateStreak());
 
       setRewardName(rewardNameRaw?.trim() || '');
       setRewardPhoto(rewardPhotoRaw?.trim() || '');
@@ -332,19 +567,210 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
     });
   };
 
-  const openEditPlanModal = () => {
-    setEditTargetDays(String(targetDays));
-    setEditStartDate(formatDateForInput(planStartDate));
-    setEditMeals(mealPlan);
+  const openEditPlanModal = async () => {
+    const [
+      targetRaw,
+      startRaw,
+      mealRaw,
+      tcRaw,
+      stepsRaw,
+      workoutRaw,
+      waterRaw,
+      supRaw,
+      customRaw,
+    ] = await Promise.all([
+      AsyncStorage.getItem('target_days'),
+      AsyncStorage.getItem('plan_start_date'),
+      AsyncStorage.getItem(MEAL_PLAN_STORAGE_KEY),
+      AsyncStorage.getItem(TRACKING_CONFIG_KEY),
+      AsyncStorage.getItem(STEPS_GOAL_KEY),
+      AsyncStorage.getItem(WORKOUT_LABEL_KEY),
+      AsyncStorage.getItem(WATER_GOAL_KEY),
+      AsyncStorage.getItem(SUPPLEMENT_LIST_KEY),
+      AsyncStorage.getItem(CUSTOM_ITEMS_KEY),
+    ]);
+
+    const parsedTarget = Number(targetRaw);
+    if (Number.isFinite(parsedTarget) && parsedTarget > 0) {
+      setEditTargetDays(String(Math.floor(parsedTarget)));
+    } else {
+      setEditTargetDays(String(targetDays));
+    }
+    setEditStartDate(formatDateForInput(startRaw || planStartDate));
+    setEditMeals(parseMealPlanFromStorage(mealRaw));
+    setEditTrackingSelected(parseTrackingConfigForEdit(tcRaw));
+    const stepsN = Number(stepsRaw);
+    setEditStepsGoal(
+      stepsRaw != null && stepsRaw !== '' && Number.isFinite(stepsN) && stepsN > 0
+        ? String(Math.floor(stepsN))
+        : '10000'
+    );
+    setEditWorkoutLabel(workoutRaw?.trim() ?? '');
+    const waterN = Number(waterRaw);
+    setEditWaterGoal(
+      waterRaw != null && waterRaw !== '' && Number.isFinite(waterN) && waterN > 0
+        ? String(Math.floor(waterN))
+        : '8'
+    );
+    try {
+      const sup = supRaw ? (JSON.parse(supRaw) as SupplementRow[]) : [];
+      setEditSupplements(
+        Array.isArray(sup) && sup.length > 0
+          ? sup.map((r) => ({
+              name: String(r?.name ?? ''),
+              timing: String(r?.timing ?? ''),
+            }))
+          : [{ name: '', timing: '' }]
+      );
+    } catch {
+      setEditSupplements([{ name: '', timing: '' }]);
+    }
+    try {
+      const ci = customRaw ? (JSON.parse(customRaw) as CustomItemRow[]) : [];
+      setEditCustomItems(
+        Array.isArray(ci) && ci.length > 0
+          ? ci.map((r) => ({
+              label: String(r?.label ?? ''),
+              emoji: String(r?.emoji ?? '⭐'),
+            }))
+          : [{ label: '', emoji: '⭐' }]
+      );
+    } catch {
+      setEditCustomItems([{ label: '', emoji: '⭐' }]);
+    }
     setShowEditPlanModal(true);
   };
 
-  const updateMealField = (idx: number, field: keyof Meal, value: string) => {
+  const toggleEditTracking = (id: TrackingId) => {
+    setEditTrackingSelected((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter((x) => x !== id);
+      }
+      const nextSet = new Set([...prev, id]);
+      return TRACKING_ORDER.filter((tid) => nextSet.has(tid));
+    });
+  };
+
+  const updateMealField = (idx: number, field: keyof PlanMeal, value: string) => {
     setEditMeals((prev) =>
-      prev.map((meal, mealIdx) =>
-        mealIdx === idx ? { ...meal, [field]: value } : meal
+      prev.map((meal, mealIdx) => (mealIdx === idx ? { ...meal, [field]: value } : meal))
+    );
+  };
+
+  const closeMealTypePicker = () => {
+    setMealTypePickerIndex(null);
+    setMealTypePickerCustom(false);
+    setMealTypeCustomDraft('');
+  };
+
+  const showIosMealTypeActionSheet = (idx: number) => {
+    const m = editMeals[idx];
+    if (!m) return;
+    const defaultCustom =
+      m.title.trim() !== '' && !mealMatchesPreset(m.emoji, m.title) ? m.title : '';
+
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        options: [
+          'Morning Ritual',
+          'Breakfast',
+          'Lunch',
+          'Snack',
+          'Dinner',
+          'Supplement',
+          'Custom',
+          'Cancel',
+        ],
+        cancelButtonIndex: 7,
+        userInterfaceStyle: 'dark',
+      },
+      (buttonIndex) => {
+        if (buttonIndex === undefined || buttonIndex === 7) return;
+        if (buttonIndex === 6) {
+          Alert.prompt(
+            'Custom meal',
+            'Enter a name for this meal',
+            (text) => {
+              const t = (text ?? '').trim();
+              if (!t) {
+                Alert.alert('Custom name', 'Please enter a meal name.');
+                return;
+              }
+              setEditMeals((prev) =>
+                prev.map((meal, i) =>
+                  i === idx ? { ...meal, emoji: CUSTOM_MEAL_EMOJI, title: t } : meal
+                )
+              );
+            },
+            'plain-text',
+            defaultCustom
+          );
+          return;
+        }
+        const preset = MEAL_TYPE_PRESETS[buttonIndex];
+        if (!preset) return;
+        setEditMeals((prev) =>
+          prev.map((meal, i) =>
+            i === idx ? { ...meal, emoji: preset.emoji, title: preset.title } : meal
+          )
+        );
+      }
+    );
+  };
+
+  const openMealTypePicker = (index: number) => {
+    const m = editMeals[index];
+    if (!m) return;
+    if (Platform.OS === 'ios') {
+      showIosMealTypeActionSheet(index);
+      return;
+    }
+    const matchesPreset = mealMatchesPreset(m.emoji, m.title);
+    const isCustom = m.title.trim() !== '' && !matchesPreset;
+    setMealTypePickerIndex(index);
+    setMealTypePickerCustom(isCustom);
+    setMealTypeCustomDraft(isCustom ? m.title : '');
+  };
+
+  const applyMealPresetDashboard = (emoji: string, title: string) => {
+    const idx = mealTypePickerIndex;
+    if (idx === null) return;
+    setEditMeals((prev) =>
+      prev.map((meal, i) => (i === idx ? { ...meal, emoji, title } : meal))
+    );
+    closeMealTypePicker();
+  };
+
+  const applyMealCustomDashboard = () => {
+    const t = mealTypeCustomDraft.trim();
+    if (!t) {
+      Alert.alert('Custom name', 'Please enter a meal name.');
+      return;
+    }
+    const idx = mealTypePickerIndex;
+    if (idx === null) return;
+    setEditMeals((prev) =>
+      prev.map((meal, i) =>
+        i === idx ? { ...meal, emoji: CUSTOM_MEAL_EMOJI, title: t } : meal
       )
     );
+    closeMealTypePicker();
+  };
+
+  const cycleEditCustomEmoji = (idx: number) => {
+    setEditCustomItems((prev) =>
+      prev.map((r, i) => {
+        if (i !== idx) return r;
+        const ix = CUSTOM_ITEM_EMOJI_CYCLE.findIndex((e) => e === r.emoji);
+        const nextIndex = ix >= 0 ? (ix + 1) % CUSTOM_ITEM_EMOJI_CYCLE.length : 0;
+        return { ...r, emoji: CUSTOM_ITEM_EMOJI_CYCLE[nextIndex] };
+      })
+    );
+  };
+
+  const closeEditPlanModal = () => {
+    closeMealTypePicker();
+    setShowEditPlanModal(false);
   };
 
   const savePlanEdits = async () => {
@@ -359,15 +785,79 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
       return;
     }
 
-    await AsyncStorage.multiSet([
+    const ordered = editTrackingSelected;
+    if (ordered.length === 0) {
+      Alert.alert('Tracking', 'Select at least one thing to track.');
+      return;
+    }
+
+    if (ordered.includes('steps')) {
+      const n = Number(editStepsGoal);
+      if (!Number.isFinite(n) || n <= 0) {
+        Alert.alert('Invalid steps goal', 'Please enter a positive daily steps goal.');
+        return;
+      }
+    }
+    if (ordered.includes('water')) {
+      const w = Number(editWaterGoal);
+      if (!Number.isFinite(w) || w <= 0) {
+        Alert.alert('Invalid water goal', 'Please enter a positive number of cups per day.');
+        return;
+      }
+    }
+
+    if (ordered.includes('meals') && editMeals.some((m) => !m.title.trim())) {
+      Alert.alert('Meals', 'Choose a meal type for every meal slot.');
+      return;
+    }
+
+    const pairs: [string, string][] = [
       ['target_days', String(Math.floor(parsedTarget))],
       ['plan_start_date', isoStartDate],
-      [MEAL_PLAN_STORAGE_KEY, JSON.stringify(editMeals)],
-    ]);
+      [TRACKING_CONFIG_KEY, JSON.stringify(ordered)],
+    ];
+
+    if (ordered.includes('meals')) {
+      pairs.push([MEAL_PLAN_STORAGE_KEY, JSON.stringify(editMeals)]);
+    } else {
+      pairs.push([MEAL_PLAN_STORAGE_KEY, JSON.stringify([])]);
+    }
+
+    if (ordered.includes('steps')) {
+      pairs.push([STEPS_GOAL_KEY, String(Math.floor(Number(editStepsGoal)))]);
+    }
+    if (ordered.includes('workout')) {
+      pairs.push([WORKOUT_LABEL_KEY, editWorkoutLabel.trim()]);
+    }
+    if (ordered.includes('water')) {
+      pairs.push([WATER_GOAL_KEY, String(Math.floor(Number(editWaterGoal)))]);
+    }
+    if (ordered.includes('supplements')) {
+      pairs.push([SUPPLEMENT_LIST_KEY, JSON.stringify(editSupplements)]);
+    }
+    if (ordered.includes('custom')) {
+      const items = editCustomItems
+        .filter((c) => c.label.trim())
+        .map((c) => ({ label: c.label.trim(), emoji: c.emoji }));
+      pairs.push([CUSTOM_ITEMS_KEY, JSON.stringify(items)]);
+    }
+
+    const removeKeys: string[] = [];
+    if (!ordered.includes('steps')) removeKeys.push(STEPS_GOAL_KEY);
+    if (!ordered.includes('workout')) removeKeys.push(WORKOUT_LABEL_KEY);
+    if (!ordered.includes('water')) removeKeys.push(WATER_GOAL_KEY);
+    if (!ordered.includes('supplements')) removeKeys.push(SUPPLEMENT_LIST_KEY);
+    if (!ordered.includes('custom')) removeKeys.push(CUSTOM_ITEMS_KEY);
+
+    await AsyncStorage.multiSet(pairs);
+    if (removeKeys.length > 0) {
+      await AsyncStorage.multiRemove(removeKeys);
+    }
 
     setTargetDays(Math.floor(parsedTarget));
     setPlanStartDate(isoStartDate);
-    setMealPlan(editMeals);
+    setMealPlan(ordered.includes('meals') ? editMeals : []);
+    setDashboardTracking(ordered);
     setShowEditPlanModal(false);
   };
 
@@ -411,18 +901,51 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
   };
 
   const resetOnboarding = async () => {
-    await AsyncStorage.removeItem('onboarding_complete');
+    try {
+      const allKeys = await AsyncStorage.getAllKeys();
+      const patternKeys = allKeys.filter(storageKeyMatchesDailyDataPattern);
+      const toRemove = [...new Set([...RESET_STATIC_KEYS, ...patternKeys, ...allKeys])];
+      if (toRemove.length > 0) {
+        await AsyncStorage.multiRemove(toRemove);
+      }
+    } catch (e) {
+      Alert.alert(
+        'Reset failed',
+        e instanceof Error ? e.message : 'Could not clear storage.'
+      );
+      return;
+    }
     try {
       DevSettings.reload();
     } catch {
-      Alert.alert('Reset complete', 'Onboarding has been reset. Please restart the app.');
+      Alert.alert(
+        'Reset complete',
+        'All data has been cleared. Please restart the app to open onboarding.'
+      );
     }
+  };
+
+  const confirmResetOnboarding = () => {
+    Alert.alert(
+      'Are you sure?',
+      'This will erase all saved app data and return you to onboarding after the app reloads.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: () => void resetOnboarding(),
+        },
+      ]
+    );
   };
 
   return (
     <View style={styles.screen}>
-      <Text style={styles.greeting}>Hey {userName}! 👋</Text>
-      <View style={styles.goalRow}>
+      <View style={styles.mainFill}>
+      <View style={styles.headerSection}>
+        <Text style={styles.greeting}>Hey {userName}! 👋</Text>
+        <View style={styles.goalRow}>
         {editingGoal ? (
           <TextInput
             value={goalDraft}
@@ -435,7 +958,10 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
             onSubmitEditing={() => void saveGoal()}
           />
         ) : (
-          <Text style={styles.goalHeadline}>{goalText}</Text>
+          <Text style={styles.goalHeadlineWrap}>
+            <Text style={styles.goalLabel}>Goal: </Text>
+            <Text style={styles.goalHeadline}>{goalText}</Text>
+          </Text>
         )}
         {editingGoal ? (
           <Pressable style={styles.editButton} onPress={() => void saveGoal()}>
@@ -452,6 +978,7 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
             <Text style={styles.editIcon}>✏️</Text>
           </Pressable>
         )}
+        </View>
       </View>
 
       <View style={styles.visionWrap}>
@@ -542,48 +1069,86 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
           {dayCounter} of {targetDays} days · {dayProgress}% there
         </Text>
       </Pressable>
+      </View>
 
-      <ScrollView
-        style={styles.bottomScroll}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.bottomScrollContent}
-      >
-        <View style={[styles.dayCounterRow, styles.dayCounterAboveTiles]}>
+      <Pressable style={styles.historyNavRow} onPress={onOpenHistory}>
+        <Text style={styles.historyNavLabel}>📖 Track Record</Text>
+        <Text style={styles.historyNavChevron}>›</Text>
+      </Pressable>
+
+      <View style={styles.dashboardFooter}>
+        <View style={styles.dayCounterRow}>
           <Text style={styles.dayCounter}>Day {dayCounter} of {targetDays}</Text>
-          <Pressable style={styles.editButton} onPress={openEditPlanModal}>
+          <Pressable style={styles.editButton} onPress={() => void openEditPlanModal()}>
             <Text style={styles.editIcon}>✏️</Text>
           </Pressable>
         </View>
 
         <Text style={styles.sectionTitle}>Today at a glance</Text>
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>🍽️</Text>
-            <Text style={styles.statValue}>{mealsDoneToday}/6</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>💧</Text>
-            <Text style={styles.statValue}>0/8</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>💊</Text>
-            <Text style={styles.statValue}>not yet</Text>
-          </View>
+        <View style={styles.footerStatsWrap}>
+          {dashboardTracking.includes('meals') ? (
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>🍽️</Text>
+              <Text style={styles.statValue}>
+                {glanceMealsDone}/{glanceMealsTotal}
+              </Text>
+            </View>
+          ) : null}
+          {dashboardTracking.includes('steps') ? (
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>👟</Text>
+              <Text style={styles.statValue}>{glanceStepsYes === true ? '✅' : '❌'}</Text>
+            </View>
+          ) : null}
+          {dashboardTracking.includes('workout') ? (
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>💪</Text>
+              <Text style={styles.statValue}>{glanceWorkoutYes === true ? '✅' : '❌'}</Text>
+            </View>
+          ) : null}
+          {dashboardTracking.includes('water') ? (
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>💧</Text>
+              <Text style={styles.statValue}>
+                {glanceWaterCups}/{glanceWaterGoal}
+              </Text>
+            </View>
+          ) : null}
+          {dashboardTracking.includes('supplements') ? (
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>💊</Text>
+              <Text style={styles.statValue}>
+                {glanceSupplementsOk === null
+                  ? '—'
+                  : glanceSupplementsOk
+                    ? '✅'
+                    : '❌'}
+              </Text>
+            </View>
+          ) : null}
+          {dashboardTracking.includes('custom')
+            ? glanceCustomLabels.map((c, i) => (
+                <View key={`glance-custom-${i}`} style={styles.statCard}>
+                  <Text style={styles.statLabel}>{c.emoji}</Text>
+                  <Text style={styles.statValue} numberOfLines={1}>
+                    {glanceCustomOk[i] ? '✅' : '❌'}
+                  </Text>
+                </View>
+              ))
+            : null}
           <View style={styles.statCard}>
             <Text style={styles.statLabel}>🔥</Text>
-            <Text style={styles.statValue}>🔥 Day 1</Text>
+            <Text style={styles.statValue}>{streakDays}d</Text>
           </View>
         </View>
 
-        <View style={styles.bottomArea}>
-          <Pressable style={styles.startButton} onPress={onStartToday}>
-            <Text style={styles.startButtonText}>Update Today {'\u2192'}</Text>
-          </Pressable>
-          <Pressable style={styles.resetLinkWrap} onPress={() => void resetOnboarding()}>
-            <Text style={styles.resetLinkText}>Reset Onboarding</Text>
-          </Pressable>
-        </View>
-      </ScrollView>
+        <Pressable style={styles.footerStartButton} onPress={onStartToday}>
+          <Text style={styles.startButtonText}>Update Today {'\u2192'}</Text>
+        </Pressable>
+        <Pressable style={styles.resetLinkWrap} onPress={confirmResetOnboarding}>
+          <Text style={styles.resetLinkText}>Reset</Text>
+        </Pressable>
+      </View>
 
       <Modal
         visible={showVisionBoardModal}
@@ -675,66 +1240,346 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
         visible={showEditPlanModal}
         animationType="slide"
         transparent
-        onRequestClose={() => setShowEditPlanModal(false)}
+        onRequestClose={closeEditPlanModal}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Edit Plan</Text>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <Text style={styles.modalLabel}>Target days</Text>
-              <TextInput
-                value={editTargetDays}
-                onChangeText={setEditTargetDays}
-                keyboardType="number-pad"
-                style={styles.modalInput}
-              />
+          <View style={[styles.modalCard, styles.planEditorModalCard]}>
+            <Text style={styles.planEditorTitle}>Edit Plan</Text>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.planEditorScrollContent}
+            >
+              <View style={styles.planEditorSection}>
+                <Text style={styles.planEditorSectionTitle}>Plan length</Text>
+                <Text style={styles.planEditorLabel}>Target days</Text>
+                <TextInput
+                  value={editTargetDays}
+                  onChangeText={setEditTargetDays}
+                  keyboardType="number-pad"
+                  style={styles.planEditorInput}
+                  placeholderTextColor="#9CA3AF"
+                />
+                <Text style={styles.planEditorLabel}>Plan start date (DD/MM/YYYY)</Text>
+                <TextInput
+                  value={editStartDate}
+                  onChangeText={setEditStartDate}
+                  placeholder="DD/MM/YYYY"
+                  placeholderTextColor="#9CA3AF"
+                  style={styles.planEditorInput}
+                />
+              </View>
 
-              <Text style={styles.modalLabel}>Plan start date (DD/MM/YYYY)</Text>
-              <TextInput
-                value={editStartDate}
-                onChangeText={setEditStartDate}
-                placeholder="DD/MM/YYYY"
-                placeholderTextColor="#9CA3AF"
-                style={styles.modalInput}
-              />
+              <Text style={styles.planEditorSectionHeading}>Tracking</Text>
+              <Text style={styles.planEditorHint}>Tap cards to add or remove what you track</Text>
+              <View style={styles.planTrackingGrid}>
+                {TRACKING_GRID_ITEMS.map((item) => {
+                  const selected = editTrackingSelected.includes(item.id);
+                  return (
+                    <Pressable
+                      key={item.id}
+                      style={[styles.planTrackingCard, selected && styles.planTrackingCardSelected]}
+                      onPress={() => toggleEditTracking(item.id)}
+                    >
+                      <Text style={styles.planTrackingEmoji}>{item.emoji}</Text>
+                      <Text style={styles.planTrackingLabel}>{item.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
 
-              <Text style={styles.modalSectionTitle}>Meal plan editor</Text>
-              {editMeals.map((meal, index) => (
-                <View key={`edit-meal-${meal.id}`} style={styles.editMealCard}>
-                  <TextInput
-                    value={meal.title}
-                    onChangeText={(v) => updateMealField(index, 'title', v)}
-                    style={styles.modalInput}
-                    placeholder="Meal title"
-                    placeholderTextColor="#9CA3AF"
-                  />
-                  <TextInput
-                    value={meal.time}
-                    onChangeText={(v) => updateMealField(index, 'time', v)}
-                    style={styles.modalInput}
-                    placeholder="Meal time"
-                    placeholderTextColor="#9CA3AF"
-                  />
-                  <TextInput
-                    value={meal.details}
-                    onChangeText={(v) => updateMealField(index, 'details', v)}
-                    style={[styles.modalInput, styles.modalTextarea]}
-                    multiline
-                    placeholder="Meal details"
-                    placeholderTextColor="#9CA3AF"
-                  />
-                </View>
-              ))}
+              {TRACKING_ORDER.filter((id) => editTrackingSelected.includes(id)).map((tid) => {
+                if (tid === 'meals') {
+                  return (
+                    <View key="cfg-meals" style={styles.planEditorSection}>
+                      <Text style={styles.planEditorSectionTitle}>🍽️ Meals</Text>
+                      {editMeals.map((meal, index) => (
+                        <View key={meal.id} style={styles.planMealEditCard}>
+                          <View style={styles.planMealEditTop}>
+                            <Pressable
+                              style={styles.planMealTypeDropdown}
+                              onPress={() => openMealTypePicker(index)}
+                            >
+                              <Text style={styles.planMealTypeDropdownText}>
+                                {mealTypeDropdownLabel(meal)}
+                              </Text>
+                              <Text style={styles.planMealTypeDropdownChevron}>▼</Text>
+                            </Pressable>
+                            <Pressable
+                              style={styles.planRemoveMealBtn}
+                              onPress={() =>
+                                setEditMeals((prev) => prev.filter((_, i) => i !== index))
+                              }
+                            >
+                              <Text style={styles.planRemoveMealBtnText}>✕</Text>
+                            </Pressable>
+                          </View>
+                          <TextInput
+                            value={meal.time}
+                            onChangeText={(v) => updateMealField(index, 'time', v)}
+                            style={styles.planEditorInput}
+                            placeholder="Time — e.g. 9:15am (optional)"
+                            placeholderTextColor="#9CA3AF"
+                          />
+                          <TextInput
+                            value={meal.intention}
+                            onChangeText={(v) => updateMealField(index, 'intention', v)}
+                            style={[styles.planEditorInput, styles.planEditorTextarea]}
+                            multiline
+                            placeholder="Nutritional intention — e.g. High protein, light and veg-led (optional)"
+                            placeholderTextColor="#9CA3AF"
+                          />
+                        </View>
+                      ))}
+                      <Pressable
+                        style={styles.planAddRowButton}
+                        onPress={() => {
+                          const id = `meal-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+                          setEditMeals((prev) => [
+                            ...prev,
+                            { id, emoji: '', title: '', time: '', intention: '' },
+                          ]);
+                        }}
+                      >
+                        <Text style={styles.planAddRowButtonText}>+ Add meal</Text>
+                      </Pressable>
+                    </View>
+                  );
+                }
+                if (tid === 'steps') {
+                  return (
+                    <View key="cfg-steps" style={styles.planEditorSection}>
+                      <Text style={styles.planEditorSectionTitle}>👟 Steps</Text>
+                      <Text style={styles.planEditorLabel}>Daily steps goal</Text>
+                      <TextInput
+                        value={editStepsGoal}
+                        onChangeText={setEditStepsGoal}
+                        keyboardType="number-pad"
+                        style={styles.planEditorInput}
+                        placeholder="10000"
+                        placeholderTextColor="#9CA3AF"
+                      />
+                    </View>
+                  );
+                }
+                if (tid === 'workout') {
+                  return (
+                    <View key="cfg-workout" style={styles.planEditorSection}>
+                      <Text style={styles.planEditorSectionTitle}>💪 Workout</Text>
+                      <Text style={styles.planEditorLabel}>Workout type e.g. Gym, Run, Yoga</Text>
+                      <TextInput
+                        value={editWorkoutLabel}
+                        onChangeText={setEditWorkoutLabel}
+                        style={styles.planEditorInput}
+                        placeholder="Gym, Run, Yoga..."
+                        placeholderTextColor="#9CA3AF"
+                      />
+                    </View>
+                  );
+                }
+                if (tid === 'water') {
+                  return (
+                    <View key="cfg-water" style={styles.planEditorSection}>
+                      <Text style={styles.planEditorSectionTitle}>💧 Water</Text>
+                      <Text style={styles.planEditorLabel}>Daily cups goal</Text>
+                      <TextInput
+                        value={editWaterGoal}
+                        onChangeText={setEditWaterGoal}
+                        keyboardType="number-pad"
+                        style={styles.planEditorInput}
+                        placeholder="8"
+                        placeholderTextColor="#9CA3AF"
+                      />
+                    </View>
+                  );
+                }
+                if (tid === 'supplements') {
+                  return (
+                    <View key="cfg-supplements" style={styles.planEditorSection}>
+                      <Text style={styles.planEditorSectionTitle}>💊 Supplements</Text>
+                      {editSupplements.map((row, idx) => (
+                        <View key={`sup-row-${idx}`} style={styles.planSubRowCard}>
+                          <TextInput
+                            value={row.name}
+                            onChangeText={(v) =>
+                              setEditSupplements((prev) =>
+                                prev.map((r, i) => (i === idx ? { ...r, name: v } : r))
+                              )
+                            }
+                            style={styles.planEditorInput}
+                            placeholder="Name"
+                            placeholderTextColor="#9CA3AF"
+                          />
+                          <TextInput
+                            value={row.timing}
+                            onChangeText={(v) =>
+                              setEditSupplements((prev) =>
+                                prev.map((r, i) => (i === idx ? { ...r, timing: v } : r))
+                              )
+                            }
+                            style={styles.planEditorInput}
+                            placeholder="Timing"
+                            placeholderTextColor="#9CA3AF"
+                          />
+                          {editSupplements.length > 1 ? (
+                            <Pressable
+                              style={styles.planRemoveLink}
+                              onPress={() =>
+                                setEditSupplements((prev) => prev.filter((_, i) => i !== idx))
+                              }
+                            >
+                              <Text style={styles.planRemoveLinkText}>Remove</Text>
+                            </Pressable>
+                          ) : null}
+                        </View>
+                      ))}
+                      <Pressable
+                        style={styles.planAddRowButton}
+                        onPress={() =>
+                          setEditSupplements((prev) => [...prev, { name: '', timing: '' }])
+                        }
+                      >
+                        <Text style={styles.planAddRowButtonText}>+ Add supplement</Text>
+                      </Pressable>
+                    </View>
+                  );
+                }
+                if (tid === 'custom') {
+                  return (
+                    <View key="cfg-custom" style={styles.planEditorSection}>
+                      <Text style={styles.planEditorSectionTitle}>⭐ Custom</Text>
+                      {editCustomItems.map((row, idx) => (
+                        <View key={`cust-row-${idx}`} style={styles.planSubRowCard}>
+                          <View style={styles.planCustomRow}>
+                            <Pressable
+                              style={styles.planEmojiPill}
+                              onPress={() => cycleEditCustomEmoji(idx)}
+                            >
+                              <Text style={styles.planEmojiPillText}>{row.emoji}</Text>
+                            </Pressable>
+                            <TextInput
+                              value={row.label}
+                              onChangeText={(v) =>
+                                setEditCustomItems((prev) =>
+                                  prev.map((r, i) => (i === idx ? { ...r, label: v } : r))
+                                )
+                              }
+                              style={[styles.planEditorInput, styles.planMealNameFlex]}
+                              placeholder="Label"
+                              placeholderTextColor="#9CA3AF"
+                            />
+                            {editCustomItems.length > 1 ? (
+                              <Pressable
+                                style={styles.planRemoveMealBtn}
+                                onPress={() =>
+                                  setEditCustomItems((prev) => prev.filter((_, i) => i !== idx))
+                                }
+                              >
+                                <Text style={styles.planRemoveMealBtnText}>✕</Text>
+                              </Pressable>
+                            ) : null}
+                          </View>
+                        </View>
+                      ))}
+                      <Pressable
+                        style={styles.planAddRowButton}
+                        onPress={() =>
+                          setEditCustomItems((prev) => [
+                            ...prev,
+                            { label: '', emoji: '⭐' },
+                          ])
+                        }
+                      >
+                        <Text style={styles.planAddRowButtonText}>+ Add custom item</Text>
+                      </Pressable>
+                    </View>
+                  );
+                }
+                return null;
+              })}
             </ScrollView>
 
-            <View style={styles.modalActions}>
-              <Pressable style={styles.cancelButton} onPress={() => setShowEditPlanModal(false)}>
-                <Text style={styles.cancelButtonText}>Cancel</Text>
+            <View style={styles.planEditorActions}>
+              <Pressable style={styles.planEditorCancelButton} onPress={closeEditPlanModal}>
+                <Text style={styles.planEditorCancelText}>Cancel</Text>
               </Pressable>
-              <Pressable style={styles.saveButton} onPress={() => void savePlanEdits()}>
-                <Text style={styles.saveButtonText}>Save</Text>
+              <Pressable style={styles.planEditorSaveButton} onPress={() => void savePlanEdits()}>
+                <Text style={styles.planEditorSaveText}>Save</Text>
               </Pressable>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={Platform.OS !== 'ios' && mealTypePickerIndex !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={closeMealTypePicker}
+      >
+        <View style={styles.planMealTypeModalRoot}>
+          <Pressable style={styles.planMealTypeModalDismiss} onPress={closeMealTypePicker} />
+          <View style={styles.planMealTypeModalCard}>
+            <Text style={styles.planMealTypeModalTitle}>Meal type</Text>
+            {!mealTypePickerCustom ? (
+              <ScrollView
+                style={styles.planMealTypeModalScroll}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                {MEAL_TYPE_PRESETS.map((p) => (
+                  <Pressable
+                    key={`${p.emoji}-${p.title}`}
+                    style={styles.planMealTypeModalOption}
+                    onPress={() => applyMealPresetDashboard(p.emoji, p.title)}
+                  >
+                    <Text style={styles.planMealTypeModalOptionText}>
+                      {p.emoji} {p.title}
+                    </Text>
+                  </Pressable>
+                ))}
+                <Pressable
+                  style={styles.planMealTypeModalOption}
+                  onPress={() => {
+                    setMealTypePickerCustom(true);
+                    setMealTypeCustomDraft('');
+                  }}
+                >
+                  <Text style={styles.planMealTypeModalOptionText}>⭐ Custom</Text>
+                </Pressable>
+              </ScrollView>
+            ) : (
+              <View style={styles.planMealTypeCustomWrap}>
+                <Text style={styles.planMealTypeCustomHint}>Enter your meal name</Text>
+                <TextInput
+                  value={mealTypeCustomDraft}
+                  onChangeText={setMealTypeCustomDraft}
+                  placeholder="e.g. Brunch, Post-workout shake"
+                  placeholderTextColor="#9CA3AF"
+                  style={styles.planEditorInput}
+                />
+                <View style={styles.planMealTypeCustomActions}>
+                  <Pressable
+                    style={styles.planMealTypeModalSecondaryBtn}
+                    onPress={() => {
+                      setMealTypePickerCustom(false);
+                      setMealTypeCustomDraft('');
+                    }}
+                  >
+                    <Text style={styles.planMealTypeModalSecondaryBtnText}>Back</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.planMealTypeModalPrimaryBtn}
+                    onPress={applyMealCustomDashboard}
+                  >
+                    <Text style={styles.planMealTypeModalPrimaryBtnText}>Done</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
+            <Pressable style={styles.planMealTypeModalCancel} onPress={closeMealTypePicker}>
+              <Text style={styles.planMealTypeModalCancelText}>Cancel</Text>
+            </Pressable>
           </View>
         </View>
       </Modal>
@@ -745,9 +1590,44 @@ export default function DashboardScreen({ onStartToday, refreshKey = 0 }: Props)
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: BG,
+    backgroundColor: '#1A1A1A',
     paddingTop: 64,
     paddingHorizontal: 16,
+    justifyContent: 'space-between',
+  },
+  mainFill: {
+    flex: 1,
+    minHeight: 0,
+    justifyContent: 'space-between',
+  },
+  headerSection: {
+    marginBottom: 8,
+  },
+  dashboardFooter: {
+    backgroundColor: '#1A1A1A',
+    borderTopWidth: 0.5,
+    borderTopColor: '#2E2E2E',
+    paddingHorizontal: 0,
+    paddingTop: 12,
+    paddingBottom: 24,
+    flexShrink: 0,
+  },
+  footerStartButton: {
+    width: '100%',
+    borderRadius: 14,
+    backgroundColor: ACCENT,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  footerStatsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    justifyContent: 'flex-start',
+    gap: 4,
+    marginTop: 0,
+    marginBottom: 10,
   },
   greeting: {
     fontSize: 28,
@@ -755,16 +1635,23 @@ const styles = StyleSheet.create({
     color: TEXT_PRIMARY,
     marginBottom: 4,
   },
-  goalHeadline: {
+  goalHeadlineWrap: {
     flex: 1,
-    fontSize: 21,
+  },
+  goalLabel: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: ACCENT,
+  },
+  goalHeadline: {
+    fontSize: 16,
     fontWeight: '700',
     color: TEXT_PRIMARY,
   },
   goalRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 28,
+    marginBottom: 0,
     gap: 8,
   },
   goalInput: {
@@ -805,13 +1692,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#3F3F3F',
     minHeight: 150,
-    marginBottom: 28,
+    marginBottom: 8,
+    position: 'relative',
   },
   visionEditButtonOverlay: {
     position: 'absolute',
     zIndex: 10,
-    top: 8,
-    right: 8,
+    bottom: 12,
+    right: 12,
   },
   visionPhoto: {
     width: '100%',
@@ -898,40 +1786,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  dayCounterAboveTiles: {
-    marginTop: 16,
-    marginBottom: 0,
-  },
-  bottomScroll: {
-    flex: 1,
-  },
-  bottomScrollContent: {
-    flexGrow: 1,
-    paddingBottom: 32,
+    marginBottom: 6,
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '700',
     color: TEXT_PRIMARY,
-    marginBottom: 0,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginTop: 12,
-    marginBottom: 16,
+    marginBottom: 6,
   },
   rewardSection: {
     backgroundColor: SURFACE,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: '#3F3F3F',
-    paddingVertical: 20,
+    paddingVertical: 10,
     paddingHorizontal: 20,
-    marginBottom: 0,
+    marginTop: 16,
+    marginBottom: 8,
   },
   rewardTitle: {
     color: ACCENT,
@@ -989,38 +1860,48 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  historyNavRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    backgroundColor: 'transparent',
+  },
+  historyNavLabel: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: ACCENT,
+  },
+  historyNavChevron: {
+    fontSize: 26,
+    fontWeight: '300',
+    color: ACCENT,
+    lineHeight: 28,
+  },
   statCard: {
     flex: 1,
+    minWidth: 0,
+    height: 64,
     backgroundColor: SURFACE,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#3F3F3F',
-    paddingVertical: 10,
-    paddingHorizontal: 8,
+    paddingVertical: 4,
+    paddingHorizontal: 4,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   statLabel: {
-    fontSize: 11,
+    fontSize: 14,
     color: TEXT_SECONDARY,
     marginBottom: 4,
   },
   statValue: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     color: TEXT_PRIMARY,
     textAlign: 'center',
-  },
-  bottomArea: {
-    marginTop: 0,
-    paddingBottom: 0,
-  },
-  startButton: {
-    width: '100%',
-    borderRadius: 14,
-    backgroundColor: ACCENT,
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   startButtonText: {
     color: TEXT_PRIMARY,
@@ -1028,7 +1909,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   resetLinkWrap: {
-    marginTop: 12,
+    marginTop: 10,
     alignSelf: 'center',
     marginBottom: 0,
   },
@@ -1173,14 +2054,6 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: 8,
   },
-  editMealCard: {
-    borderWidth: 1,
-    borderColor: '#3F3F3F',
-    borderRadius: 12,
-    padding: 10,
-    marginBottom: 10,
-    backgroundColor: SURFACE,
-  },
   modalTextarea: {
     minHeight: 64,
     textAlignVertical: 'top',
@@ -1216,6 +2089,322 @@ const styles = StyleSheet.create({
   saveButtonText: {
     color: TEXT_PRIMARY,
     fontWeight: '800',
+  },
+  planEditorModalCard: {
+    backgroundColor: BG,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    maxHeight: '92%',
+    paddingBottom: 12,
+  },
+  planEditorTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
+    marginBottom: 12,
+  },
+  planEditorScrollContent: {
+    paddingBottom: 24,
+  },
+  planEditorSection: {
+    backgroundColor: SURFACE,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#3F3F3F',
+    padding: 14,
+    marginBottom: 14,
+  },
+  planEditorSectionHeading: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: ACCENT,
+    marginBottom: 4,
+  },
+  planEditorSectionTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: TEXT_PRIMARY,
+    marginBottom: 10,
+  },
+  planEditorHint: {
+    color: TEXT_SECONDARY,
+    fontSize: 13,
+    marginBottom: 10,
+    fontWeight: '600',
+  },
+  planEditorLabel: {
+    color: TEXT_SECONDARY,
+    fontWeight: '600',
+    fontSize: 13,
+    marginBottom: 6,
+  },
+  planEditorInput: {
+    borderWidth: 1,
+    borderColor: '#3F3F3F',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    color: TEXT_PRIMARY,
+    marginBottom: 10,
+    backgroundColor: '#252525',
+  },
+  planEditorTextarea: {
+    minHeight: 72,
+    textAlignVertical: 'top',
+  },
+  planTrackingGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 16,
+  },
+  planTrackingCard: {
+    width: '31%',
+    minWidth: '28%',
+    flexGrow: 1,
+    maxWidth: '32%',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 6,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#3F3F3F',
+    backgroundColor: SURFACE,
+    marginBottom: 6,
+  },
+  planTrackingCardSelected: {
+    borderColor: ACCENT,
+    backgroundColor: '#363636',
+  },
+  planTrackingEmoji: {
+    fontSize: 22,
+    marginBottom: 4,
+  },
+  planTrackingLabel: {
+    color: TEXT_PRIMARY,
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  planMealEditCard: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#3F3F3F',
+    backgroundColor: '#252525',
+    padding: 10,
+    marginBottom: 10,
+  },
+  planMealEditTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  planMealTypeDropdown: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#3F3F3F',
+    backgroundColor: '#1F1F1F',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  planMealTypeDropdownText: {
+    flex: 1,
+    fontSize: 15,
+    color: TEXT_PRIMARY,
+    fontWeight: '600',
+  },
+  planMealTypeDropdownChevron: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    marginLeft: 8,
+  },
+  planMealTypeModalRoot: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  planMealTypeModalDismiss: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  planMealTypeModalCard: {
+    backgroundColor: '#252525',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#3F3F3F',
+    padding: 16,
+    maxHeight: '78%',
+    zIndex: 1,
+  },
+  planMealTypeModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: TEXT_PRIMARY,
+    marginBottom: 12,
+  },
+  planMealTypeModalScroll: {
+    maxHeight: 320,
+  },
+  planMealTypeModalOption: {
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#3F3F3F',
+  },
+  planMealTypeModalOptionText: {
+    fontSize: 16,
+    color: TEXT_PRIMARY,
+    fontWeight: '600',
+  },
+  planMealTypeCustomWrap: {
+    gap: 12,
+  },
+  planMealTypeCustomHint: {
+    fontSize: 14,
+    color: '#D1D5DB',
+    marginBottom: 4,
+  },
+  planMealTypeCustomActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+  },
+  planMealTypeModalSecondaryBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#4B5563',
+    alignItems: 'center',
+  },
+  planMealTypeModalSecondaryBtnText: {
+    color: '#D1D5DB',
+    fontWeight: '700',
+  },
+  planMealTypeModalPrimaryBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: ACCENT,
+    alignItems: 'center',
+  },
+  planMealTypeModalPrimaryBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  planMealTypeModalCancel: {
+    marginTop: 14,
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  planMealTypeModalCancelText: {
+    color: '#9CA3AF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  planEmojiPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: ACCENT,
+    backgroundColor: '#1F1F1F',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  planEmojiPillText: {
+    fontSize: 18,
+  },
+  planMealNameFlex: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  planRemoveMealBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#4B5563',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1F1F1F',
+  },
+  planRemoveMealBtnText: {
+    color: '#F87171',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  planAddRowButton: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: ACCENT,
+    paddingVertical: 12,
+    alignItems: 'center',
+    backgroundColor: '#2A1810',
+  },
+  planAddRowButtonText: {
+    color: ACCENT,
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  planSubRowCard: {
+    marginBottom: 10,
+    paddingBottom: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#3F3F3F',
+  },
+  planRemoveLink: {
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+  },
+  planRemoveLinkText: {
+    color: '#F87171',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  planCustomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  planEditorActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#3F3F3F',
+  },
+  planEditorCancelButton: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#3F3F3F',
+    backgroundColor: SURFACE,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  planEditorCancelText: {
+    color: TEXT_SECONDARY,
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  planEditorSaveButton: {
+    flex: 1,
+    borderRadius: 12,
+    backgroundColor: ACCENT,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  planEditorSaveText: {
+    color: TEXT_PRIMARY,
+    fontWeight: '800',
+    fontSize: 16,
   },
 });
 
