@@ -32,7 +32,14 @@ export async function requestDayCheckIn(userMessage: string): Promise<string> {
     );
   }
 
-  const res = await fetch(ANTHROPIC_MESSAGES_URL, {
+  console.log(
+    'Key length:',
+    process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY?.length,
+    'Starts with:',
+    process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY?.substring(0, 10)
+  );
+
+  const response = await fetch(ANTHROPIC_MESSAGES_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -47,9 +54,13 @@ export async function requestDayCheckIn(userMessage: string): Promise<string> {
     }),
   });
 
-  const rawText = await res.text();
-  if (!res.ok) {
-    throw new Error(rawText || `Check-in request failed (${res.status})`);
+  console.log('Response status:', response.status);
+
+  const rawText = await response.text();
+  console.log('Raw response:', rawText);
+
+  if (!response.ok) {
+    throw new Error(rawText || `Check-in request failed (${response.status})`);
   }
 
   let data: AnthropicMessageResponse;
