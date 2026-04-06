@@ -30,10 +30,11 @@ export const motivationalQuotes = [
 type Props = {
   visible: boolean;
   quote: string;
-  onDismiss: () => void;
+  /** Persist quote dismissal (e.g. last_quote_date) before hiding; may be async. */
+  onLetsGo: () => void | Promise<void>;
 };
 
-export default function MotivationalQuote({ visible, quote, onDismiss }: Props) {
+export default function MotivationalQuote({ visible, quote, onLetsGo }: Props) {
   return (
     <Modal
       visible={visible}
@@ -51,7 +52,12 @@ export default function MotivationalQuote({ visible, quote, onDismiss }: Props) 
           <Text style={styles.quoteText}>{quote}</Text>
         </View>
 
-        <Pressable style={styles.button} onPress={onDismiss}>
+        <Pressable
+          style={styles.button}
+          onPress={() => {
+            void onLetsGo();
+          }}
+        >
           <Text style={styles.buttonText}>Let&apos;s go {'\u2192'}</Text>
         </Pressable>
       </LinearGradient>

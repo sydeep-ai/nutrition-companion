@@ -594,7 +594,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
             <Text style={styles.primaryButtonText}>Continue</Text>
           </Pressable>
           <Pressable onPress={() => void skipIntentions()}>
-            <Text style={styles.skipText}>Skip</Text>
+            <Text style={styles.skipText}>Add Later</Text>
           </Pressable>
         </View>
       );
@@ -616,7 +616,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
             <Text style={styles.primaryButtonText}>Continue</Text>
           </Pressable>
           <Pressable onPress={goNext}>
-            <Text style={styles.skipText}>Skip</Text>
+            <Text style={styles.skipText}>Add Later</Text>
           </Pressable>
         </View>
       );
@@ -626,6 +626,10 @@ export default function OnboardingScreen({ onComplete }: Props) {
       return (
         <View style={styles.stepBody}>
           <Text style={styles.heading}>Add photos that represent your goal</Text>
+          <Text style={styles.visionBoardDescription}>
+            This is your vision board — photos that represent what you&apos;re working towards. You
+            can add or update these anytime from your dashboard.
+          </Text>
           <View style={styles.visionGrid}>
             {Array.from({ length: VISION_SLOTS }).map((_, index) => {
               const uri = visionPhotos[index];
@@ -648,7 +652,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
             <Text style={styles.primaryButtonText}>Continue</Text>
           </Pressable>
           <Pressable onPress={goNext}>
-            <Text style={styles.skipText}>Skip</Text>
+            <Text style={styles.skipText}>Add Later</Text>
           </Pressable>
         </View>
       );
@@ -686,7 +690,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
             <Text style={styles.primaryButtonText}>Continue</Text>
           </Pressable>
           <Pressable onPress={goNext}>
-            <Text style={styles.skipText}>Skip</Text>
+            <Text style={styles.skipText}>Add Later</Text>
           </Pressable>
         </View>
       );
@@ -1316,6 +1320,13 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
+  },
+  visionBoardDescription: {
+    fontSize: 13,
+    color: '#888',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginBottom: 16,
   },
   skipText: {
     marginTop: 14,

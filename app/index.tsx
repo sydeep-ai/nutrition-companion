@@ -165,6 +165,7 @@ async function buildDayCheckinUserMessage(todayKey: string): Promise<string> {
     'target_days',
     TRACKING_CONFIG_KEY,
     MEAL_PLAN_STORAGE_KEY,
+    STORAGE_KEY,
     `meal_ticks_${todayKey}`,
     stepsStorageKey(todayKey),
     STEPS_GOAL_KEY,
@@ -177,6 +178,21 @@ async function buildDayCheckinUserMessage(todayKey: string): Promise<string> {
     journalStorageKeyForDate(todayKey),
   ]);
   const g = Object.fromEntries(entries) as Record<string, string | null>;
+
+  const checkedMealIds = new Set<string>();
+  try {
+    const tickRaw = g[STORAGE_KEY];
+    if (tickRaw) {
+      const p = JSON.parse(tickRaw) as { date?: string; checkedIds?: string[] };
+      if (p.date === todayKey && Array.isArray(p.checkedIds)) {
+        for (const id of p.checkedIds) {
+          if (typeof id === 'string') checkedMealIds.add(id);
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
 
   let intentionsBlock = '(none recorded)';
   try {
@@ -207,21 +223,27 @@ async function buildDayCheckinUserMessage(todayKey: string): Promise<string> {
   lines.push('');
 
   if (tracking.includes('meals')) {
-    let mealSummary = '(no meal plan in storage)';
+    lines.push('Meals logged today:');
     try {
-      const plan = g[MEAL_PLAN_STORAGE_KEY] ? (JSON.parse(g[MEAL_PLAN_STORAGE_KEY] as string) as PlanMeal[]) : [];
+      const plan = g[MEAL_PLAN_STORAGE_KEY]
+        ? (JSON.parse(g[MEAL_PLAN_STORAGE_KEY] as string) as PlanMeal[])
+        : [];
       if (Array.isArray(plan) && plan.length > 0) {
-        mealSummary = plan
-          .map((m) => {
-            const em = (m.emoji || '🍽️').trim();
-            return `- ${em} ${m.title?.trim() || 'Meal'} @ ${m.time?.trim() || '?'}${m.intention?.trim() ? ` — ${m.intention.trim()}` : ''}`;
-          })
-          .join('\n');
+        for (const m of plan) {
+          const title = m.title?.trim() || 'Meal';
+          const intention = m.intention?.trim() || 'not set';
+          const ticked = checkedMealIds.has(m.id);
+          lines.push(
+            `- ${title} (intention: ${intention}) — ${ticked ? 'TICKED ✅' : 'MISSED ❌'}`
+          );
+        }
+      } else {
+        lines.push('- (no meals in plan)');
       }
     } catch {
-      mealSummary = '(meal plan parse error)';
+      lines.push('(meal plan parse error)');
     }
-    let ticksLine = '(no meal tick data)';
+    let ticksLine = '(no meal tick aggregate)';
     try {
       const ticksRaw = g[`meal_ticks_${todayKey}`];
       if (ticksRaw) {
@@ -233,8 +255,6 @@ async function buildDayCheckinUserMessage(todayKey: string): Promise<string> {
     } catch {
       ticksLine = '(meal ticks parse error)';
     }
-    lines.push('### Meals');
-    lines.push(mealSummary);
     lines.push(ticksLine);
     lines.push('');
   }
@@ -812,6 +832,75 @@ export default function TodayScreen({ onPressHome }: Props) {
     customItems,
     customYesNo,
   ]);
+
+  /** 75% gate for Review my Day: water counts as 1 item (done when cups >= goal). */
+  const checkinGateStats = useMemo(() => {
+    let completed = 0;
+    let total = 0;
+    const mealIdSet = new Set(meals.map((m) => m.id));
+
+    if (trackingConfig.includes('meals') && meals.length > 0) {
+      total += meals.length;
+      completed += checkedIds.filter((id) => mealIdSet.has(id)).length;
+    }
+    if (trackingConfig.includes('steps')) {
+      total += 1;
+      if (stepsAnswer === 'yes') completed += 1;
+    }
+    if (trackingConfig.includes('workout')) {
+      total += 1;
+      if (workoutAnswer === 'yes') completed += 1;
+    }
+    if (trackingConfig.includes('water') && waterGoal > 0) {
+      total += 1;
+      if (waterCups >= waterGoal) completed += 1;
+    }
+    if (trackingConfig.includes('supplements')) {
+      supplementList.forEach((row, i) => {
+        if (!row.name.trim() && !row.timing.trim()) return;
+        total += 1;
+        if (supplementChecks[i]) completed += 1;
+      });
+    }
+    if (trackingConfig.includes('custom')) {
+      customItems.forEach((item, i) => {
+        if (!item.label.trim()) return;
+        total += 1;
+        if (customYesNo[i] === 'yes') completed += 1;
+      });
+    }
+
+    const pct = total === 0 ? 100 : Math.round((completed / total) * 100);
+    return { completed, total, pct };
+  }, [
+    trackingConfig,
+    meals,
+    checkedIds,
+    stepsAnswer,
+    workoutAnswer,
+    waterGoal,
+    waterCups,
+    supplementList,
+    supplementChecks,
+    customItems,
+    customYesNo,
+  ]);
+
+  const onPressReviewMyDay = useCallback(() => {
+    if (checkinLoading) {
+      return;
+    }
+    const { total, pct } = checkinGateStats;
+    if (total > 0 && pct < 75) {
+      Alert.alert(
+        'Log more first',
+        `You've completed ${pct}% of your tracking today. You need at least 75% to get a meaningful review.`,
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    void runDayCheckin();
+  }, [checkinLoading, checkinGateStats, runDayCheckin]);
 
   const persistStepsAnswer = useCallback(async (v: 'yes' | 'no') => {
     setStepsAnswer(v);
@@ -1426,12 +1515,8 @@ export default function TodayScreen({ onPressHome }: Props) {
               </View>
             ) : null}
             <Pressable
-              style={[
-                styles.checkinReviewButton,
-                checkinLoading ? styles.checkinReviewButtonDisabled : undefined,
-              ]}
-              onPress={() => void runDayCheckin()}
-              disabled={checkinLoading}
+              style={styles.checkinReviewButton}
+              onPress={onPressReviewMyDay}
             >
               <Text style={styles.checkinReviewButtonText}>🤖 Review my Day</Text>
             </Pressable>
@@ -1661,7 +1746,7 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     marginTop: 4,
     marginBottom: 12,
-    backgroundColor: ACCENT,
+    backgroundColor: '#D85A30',
     borderRadius: 14,
     paddingVertical: 18,
     alignItems: 'center',
@@ -1671,9 +1756,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
-  },
-  checkinReviewButtonDisabled: {
-    opacity: 0.55,
   },
   checkinLoadingCard: {
     width: '100%',
