@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "nutrition-companion",
+    "name": "Nutrition Companion",
     "slug": "nutrition-companion",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -13,7 +13,9 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.sydeepai.nutritioncompanion",
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
@@ -25,6 +27,11 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "671da47f-c257-4ce0-a2d7-dbe50b323f75"
+      }
     }
   }
 }

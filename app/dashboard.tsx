@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionSheetIOS,
   Alert,
-  DevSettings,
   Dimensions,
   Image,
   Modal,
@@ -90,44 +89,9 @@ const REWARD_PHOTO_STORAGE_KEY = 'reward_photo';
 const VISION_PHOTOS_KEY = 'vision_photos';
 const VISION_SLOTS = 5;
 
-/** Keys cleared on full reset (plus all keys from storage and daily-data pattern matches). */
-const RESET_STATIC_KEYS: string[] = [
-  'onboarding_complete',
-  'user_name',
-  'user_goal',
-  'user_why',
-  'user_intentions',
-  VISION_PHOTOS_KEY,
-  REWARD_NAME_STORAGE_KEY,
-  REWARD_PHOTO_STORAGE_KEY,
-  'target_days',
-  'plan_start_date',
-  TRACKING_CONFIG_KEY,
-  MEAL_PLAN_STORAGE_KEY,
-  STEPS_GOAL_KEY,
-  WATER_GOAL_KEY,
-  WORKOUT_LABEL_KEY,
-  SUPPLEMENT_LIST_KEY,
-  CUSTOM_ITEMS_KEY,
-  'last_quote_date',
-];
-
-function storageKeyMatchesDailyDataPattern(key: string): boolean {
-  if (key.startsWith('meal_ticks_')) return true;
-  if (key.startsWith('journal_')) return true;
-  if (key.startsWith('checkin_')) return true;
-  if (key.startsWith('water_cups_')) return true;
-  if (key.startsWith('supplements_')) return true;
-  if (key.startsWith('movement_')) return true;
-  if (key.startsWith('steps_') && key !== STEPS_GOAL_KEY) return true;
-  if (key.startsWith('workout_') && key !== WORKOUT_LABEL_KEY) return true;
-  if (key.startsWith('custom_') && key !== CUSTOM_ITEMS_KEY) return true;
-  return false;
-}
-
 type Props = {
   onStartToday: () => void;
-  onOpenHistory: () => void;
+  openEditPlanRef: React.MutableRefObject<(() => void) | null>;
   refreshKey?: number;
 };
 
@@ -207,7 +171,11 @@ function VisionBoardSlot({ uri, size, onPick, onDelete }: VisionBoardSlotProps) 
   );
 }
 
-export default function DashboardScreen({ onStartToday, onOpenHistory, refreshKey = 0 }: Props) {
+export default function DashboardScreen({
+  onStartToday,
+  openEditPlanRef,
+  refreshKey = 0,
+}: Props) {
   const screenWidth = Dimensions.get('window').width;
   const visionCardWidth = Math.floor(screenWidth * 0.85);
   const visionCardGap = 10;
@@ -900,45 +868,17 @@ export default function DashboardScreen({ onStartToday, onOpenHistory, refreshKe
     setShowRewardModal(false);
   };
 
-  const resetOnboarding = async () => {
-    try {
-      const allKeys = await AsyncStorage.getAllKeys();
-      const patternKeys = allKeys.filter(storageKeyMatchesDailyDataPattern);
-      const toRemove = [...new Set([...RESET_STATIC_KEYS, ...patternKeys, ...allKeys])];
-      if (toRemove.length > 0) {
-        await AsyncStorage.multiRemove(toRemove);
-      }
-    } catch (e) {
-      Alert.alert(
-        'Reset failed',
-        e instanceof Error ? e.message : 'Could not clear storage.'
-      );
-      return;
-    }
-    try {
-      DevSettings.reload();
-    } catch {
-      Alert.alert(
-        'Reset complete',
-        'All data has been cleared. Please restart the app to open onboarding.'
-      );
-    }
-  };
+  const openPlanFnRef = useRef(openEditPlanModal);
+  openPlanFnRef.current = openEditPlanModal;
 
-  const confirmResetOnboarding = () => {
-    Alert.alert(
-      'Are you sure?',
-      'This will erase all saved app data and return you to onboarding after the app reloads.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Reset',
-          style: 'destructive',
-          onPress: () => void resetOnboarding(),
-        },
-      ]
-    );
-  };
+  useEffect(() => {
+    openEditPlanRef.current = () => {
+      void openPlanFnRef.current();
+    };
+    return () => {
+      openEditPlanRef.current = null;
+    };
+  }, [openEditPlanRef]);
 
   return (
     <View style={styles.screen}>
@@ -1050,7 +990,9 @@ export default function DashboardScreen({ onStartToday, onOpenHistory, refreshKe
 
       <Pressable style={styles.rewardSection} onPress={openRewardModal}>
         <Text style={styles.rewardTitle}>🎯 Your Reward</Text>
-        <Text style={styles.rewardNameText}>
+        <Text
+          style={rewardName ? styles.rewardNameText : styles.rewardNamePlaceholder}
+        >
           {rewardName ? rewardName : 'Tap to set your reward →'}
         </Text>
         <View style={styles.rewardProgressWrap}>
@@ -1071,17 +1013,9 @@ export default function DashboardScreen({ onStartToday, onOpenHistory, refreshKe
       </Pressable>
       </View>
 
-      <Pressable style={styles.historyNavRow} onPress={onOpenHistory}>
-        <Text style={styles.historyNavLabel}>📖 Track Record</Text>
-        <Text style={styles.historyNavChevron}>›</Text>
-      </Pressable>
-
       <View style={styles.dashboardFooter}>
         <View style={styles.dayCounterRow}>
           <Text style={styles.dayCounter}>Day {dayCounter} of {targetDays}</Text>
-          <Pressable style={styles.editButton} onPress={() => void openEditPlanModal()}>
-            <Text style={styles.editIcon}>✏️</Text>
-          </Pressable>
         </View>
 
         <Text style={styles.sectionTitle}>Today at a glance</Text>
@@ -1144,9 +1078,6 @@ export default function DashboardScreen({ onStartToday, onOpenHistory, refreshKe
 
         <Pressable style={styles.footerStartButton} onPress={onStartToday}>
           <Text style={styles.startButtonText}>Update Today {'\u2192'}</Text>
-        </Pressable>
-        <Pressable style={styles.resetLinkWrap} onPress={confirmResetOnboarding}>
-          <Text style={styles.resetLinkText}>Reset</Text>
         </Pressable>
       </View>
 
@@ -1816,6 +1747,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 10,
   },
+  rewardNamePlaceholder: {
+    fontSize: 14,
+    color: '#888',
+    fontStyle: 'italic',
+    marginBottom: 10,
+  },
   rewardProgressWrap: {
     position: 'relative',
     justifyContent: 'center',
@@ -1860,25 +1797,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  historyNavRow: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    backgroundColor: 'transparent',
-  },
-  historyNavLabel: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: ACCENT,
-  },
-  historyNavChevron: {
-    fontSize: 26,
-    fontWeight: '300',
-    color: ACCENT,
-    lineHeight: 28,
-  },
   statCard: {
     flex: 1,
     minWidth: 0,
@@ -1907,16 +1825,6 @@ const styles = StyleSheet.create({
     color: TEXT_PRIMARY,
     fontSize: 18,
     fontWeight: '800',
-  },
-  resetLinkWrap: {
-    marginTop: 10,
-    alignSelf: 'center',
-    marginBottom: 0,
-  },
-  resetLinkText: {
-    color: '#9CA3AF',
-    fontSize: 12,
-    fontWeight: '600',
   },
   visionBoardModalRoot: {
     flex: 1,
