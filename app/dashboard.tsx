@@ -859,9 +859,6 @@ export default function DashboardScreen({
     openEditPlanRef.current = () => {
       void openPlanFnRef.current();
     };
-    return () => {
-      openEditPlanRef.current = null;
-    };
   }, [openEditPlanRef]);
 
   return (

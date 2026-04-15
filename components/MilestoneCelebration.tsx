@@ -37,10 +37,14 @@ export type MilestoneCelebrationPayload = {
   rewardPhotoUri: string | null;
 };
 
-/** Temporary testing: min plan day to show each celebration. Revert to 7, 14, 30 for production. */
-export const MILESTONE_TRIGGER_DAY_FOR_7 = 1;
-export const MILESTONE_TRIGGER_DAY_FOR_14 = 2;
-export const MILESTONE_TRIGGER_DAY_FOR_30 = 3;
+/**
+ * Production milestone gates (plan day from App.tsx, inclusive).
+ * Day-7 screen only when day >= 7; day-14 when day >= 14; day-30 when day >= 30.
+ * Do not use test thresholds (1 / 2 / 3) here.
+ */
+export const MILESTONE_TRIGGER_DAY_FOR_7 = 7 as const;
+export const MILESTONE_TRIGGER_DAY_FOR_14 = 14 as const;
+export const MILESTONE_TRIGGER_DAY_FOR_30 = 30 as const;
 
 type Props = {
   visible: boolean;

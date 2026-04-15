@@ -1,9 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
+import { CommonActions, useNavigation } from '@react-navigation/native';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   DevSettings,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,6 +14,11 @@ import {
 } from 'react-native';
 import { FONT_BODY, FONT_SEMIBOLD, FONT_BOLD, FONT_EXTRA } from '../constants/fonts';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  DEFAULT_MEAL_PLAN,
+  parseMealPlanFromStorage,
+  PlanMeal,
+} from '../data/defaultMealPlan';
 
 const ACCENT = '#D85A30';
 const BG = '#1A1A1A';
@@ -20,66 +26,63 @@ const ROW_BG = '#2E2E2E';
 const TEXT = '#FAFAFA';
 const GREY = '#888888';
 
+const MEAL_PLAN_STORAGE_KEY = 'meal_plan';
+const TRACKING_CONFIG_KEY = 'tracking_config';
 const STEPS_GOAL_KEY = 'steps_goal';
 const WORKOUT_LABEL_KEY = 'workout_label';
+const WATER_GOAL_KEY = 'water_goal';
+const SUPPLEMENT_LIST_KEY = 'supplement_list';
 const CUSTOM_ITEMS_KEY = 'custom_items';
 
-const RESET_STATIC_KEYS: string[] = [
-  'onboarding_complete',
-  'user_name',
-  'user_goal',
-  'user_why',
-  'user_intentions',
-  'vision_photos',
-  'reward_name',
-  'reward_photo',
-  'target_days',
-  'plan_start_date',
-  'tracking_config',
-  'meal_plan',
-  STEPS_GOAL_KEY,
-  'water_goal',
-  WORKOUT_LABEL_KEY,
-  CUSTOM_ITEMS_KEY,
-  'last_quote_date',
-  'milestone_shown_7',
-  'milestone_shown_14',
-  'milestone_shown_30',
+const TRACKING_ORDER = [
+  'meals',
+  'steps',
+  'workout',
+  'water',
+  'supplements',
+  'custom',
+] as const;
+
+type TrackingId = (typeof TRACKING_ORDER)[number];
+
+const TRACKING_GRID_ITEMS: { id: TrackingId; emoji: string; label: string }[] = [
+  { id: 'meals', emoji: '🍽️', label: 'Meals' },
+  { id: 'steps', emoji: '👟', label: 'Steps' },
+  { id: 'workout', emoji: '💪', label: 'Workout' },
+  { id: 'water', emoji: '💧', label: 'Water' },
+  { id: 'supplements', emoji: '💊', label: 'Supplements' },
+  { id: 'custom', emoji: '⭐', label: 'Custom' },
 ];
 
-function storageKeyMatchesDailyDataPattern(key: string): boolean {
-  if (key.startsWith('meal_ticks_')) return true;
-  if (key.startsWith('journal_')) return true;
-  if (key.startsWith('checkin_')) return true;
-  if (key.startsWith('water_cups_')) return true;
-  if (key.startsWith('supplements_')) return true;
-  if (key.startsWith('movement_')) return true;
-  if (key.startsWith('steps_') && key !== STEPS_GOAL_KEY) return true;
-  if (key.startsWith('workout_') && key !== WORKOUT_LABEL_KEY) return true;
-  if (key.startsWith('custom_') && key !== CUSTOM_ITEMS_KEY) return true;
-  return false;
+type CustomItemRow = { label: string; emoji: string };
+
+const CUSTOM_ITEM_EMOJI_CYCLE = ['⭐', '🧘', '🚴', '📚', '🎯', '🌿'] as const;
+
+function isTrackingId(s: string): s is TrackingId {
+  return (TRACKING_ORDER as readonly string[]).includes(s);
 }
 
-const TODAY_TICK_KEY = 'today_tick_state_v1';
-
-function todayKeysToRemove(): string[] {
-  const today = new Date().toISOString().split('T')[0];
-  const keys: string[] = [
-    TODAY_TICK_KEY,
-    `meal_ticks_${today}`,
-    `steps_${today}`,
-    `workout_${today}`,
-    `water_cups_${today}`,
-    `supplements_${today}`,
-    `journal_${today}`,
-    `checkin_${today}`,
-    `movement_steps_${today}`,
-    `movement_workout_${today}`,
-  ];
-  for (let i = 0; i < 20; i += 1) {
-    keys.push(`custom_${i}_${today}`);
+function parseTrackingConfigForEdit(raw: string | null): TrackingId[] {
+  if (raw === null || raw === undefined) {
+    return ['meals'];
   }
-  return keys;
+  try {
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) {
+      return ['meals'];
+    }
+    if (arr.length === 0) {
+      return [];
+    }
+    const ids = arr.filter((x): x is TrackingId => typeof x === 'string' && isTrackingId(x));
+    return TRACKING_ORDER.filter((id) => ids.includes(id));
+  } catch {
+    return ['meals'];
+  }
+}
+
+function newMealId(): string {
+  return `meal-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
 type Props = {
@@ -90,12 +93,22 @@ type EditField = null | 'goal' | 'why' | 'intentions';
 
 const MAX_INTENTIONS = 5;
 
-export default function SettingsScreen({ openEditPlanRef }: Props) {
+export default function SettingsScreen({ openEditPlanRef: _openEditPlanRef }: Props) {
   const navigation = useNavigation();
   const [goalDraft, setGoalDraft] = useState('');
   const [whyDraft, setWhyDraft] = useState('');
   const [intentionsDraft, setIntentionsDraft] = useState('');
   const [editing, setEditing] = useState<EditField>(null);
+
+  const [editPlanVisible, setEditPlanVisible] = useState(false);
+  const [editTrackingSelected, setEditTrackingSelected] = useState<TrackingId[]>(['meals']);
+  const [editMeals, setEditMeals] = useState<PlanMeal[]>(DEFAULT_MEAL_PLAN);
+  const [editStepsGoal, setEditStepsGoal] = useState('10000');
+  const [editWorkoutLabel, setEditWorkoutLabel] = useState('');
+  const [editWaterGoal, setEditWaterGoal] = useState('8');
+  const [editCustomItems, setEditCustomItems] = useState<CustomItemRow[]>([
+    { label: '', emoji: '⭐' },
+  ]);
 
   const loadProfile = useCallback(async () => {
     const [g, w, i] = await Promise.all([
@@ -121,6 +134,194 @@ export default function SettingsScreen({ openEditPlanRef }: Props) {
     void loadProfile();
   }, [loadProfile]);
 
+  const loadEditPlanState = useCallback(async () => {
+    const [mealRaw, tcRaw, stepsRaw, workoutRaw, waterRaw, customRaw] = await Promise.all([
+      AsyncStorage.getItem(MEAL_PLAN_STORAGE_KEY),
+      AsyncStorage.getItem(TRACKING_CONFIG_KEY),
+      AsyncStorage.getItem(STEPS_GOAL_KEY),
+      AsyncStorage.getItem(WORKOUT_LABEL_KEY),
+      AsyncStorage.getItem(WATER_GOAL_KEY),
+      AsyncStorage.getItem(CUSTOM_ITEMS_KEY),
+    ]);
+
+    setEditTrackingSelected(parseTrackingConfigForEdit(tcRaw));
+    setEditMeals(parseMealPlanFromStorage(mealRaw));
+    const stepsN = Number(stepsRaw);
+    setEditStepsGoal(
+      stepsRaw != null && stepsRaw !== '' && Number.isFinite(stepsN) && stepsN > 0
+        ? String(Math.floor(stepsN))
+        : '10000'
+    );
+    setEditWorkoutLabel(workoutRaw?.trim() ?? '');
+    const waterN = Number(waterRaw);
+    setEditWaterGoal(
+      waterRaw != null && waterRaw !== '' && Number.isFinite(waterN) && waterN > 0
+        ? String(Math.floor(waterN))
+        : '8'
+    );
+    try {
+      const ci = customRaw ? (JSON.parse(customRaw) as CustomItemRow[]) : [];
+      setEditCustomItems(
+        Array.isArray(ci) && ci.length > 0
+          ? ci.map((r) => ({
+              label: String(r?.label ?? ''),
+              emoji: String(r?.emoji ?? '⭐'),
+            }))
+          : [{ label: '', emoji: '⭐' }]
+      );
+    } catch {
+      setEditCustomItems([{ label: '', emoji: '⭐' }]);
+    }
+  }, []);
+
+  const openEditPlanModal = useCallback(() => {
+    void loadEditPlanState().then(() => setEditPlanVisible(true));
+  }, [loadEditPlanState]);
+
+  const toggleEditTracking = (id: TrackingId) => {
+    setEditTrackingSelected((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter((x) => x !== id);
+      }
+      const nextSet = new Set([...prev, id]);
+      return TRACKING_ORDER.filter((tid) => nextSet.has(tid));
+    });
+  };
+
+  const updateMealField = (idx: number, field: keyof PlanMeal, value: string) => {
+    setEditMeals((prev) =>
+      prev.map((meal, mealIdx) => (mealIdx === idx ? { ...meal, [field]: value } : meal))
+    );
+  };
+
+  const addMealSlot = () => {
+    setEditMeals((prev) => [
+      ...prev,
+      {
+        id: newMealId(),
+        emoji: '🍽️',
+        title: '',
+        time: '',
+        intention: '',
+      },
+    ]);
+  };
+
+  const removeMealSlot = (idx: number) => {
+    setEditMeals((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const cycleEditCustomEmoji = (idx: number) => {
+    setEditCustomItems((prev) =>
+      prev.map((r, i) => {
+        if (i !== idx) return r;
+        const ix = CUSTOM_ITEM_EMOJI_CYCLE.findIndex((e) => e === r.emoji);
+        const nextIndex = ix >= 0 ? (ix + 1) % CUSTOM_ITEM_EMOJI_CYCLE.length : 0;
+        return { ...r, emoji: CUSTOM_ITEM_EMOJI_CYCLE[nextIndex] };
+      })
+    );
+  };
+
+  const addCustomRow = () => {
+    setEditCustomItems((prev) => [...prev, { label: '', emoji: '⭐' }]);
+  };
+
+  const removeCustomRow = (idx: number) => {
+    setEditCustomItems((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const dismissEditPlan = () => {
+    setEditPlanVisible(false);
+  };
+
+  const saveEditPlan = async () => {
+    const ordered = editTrackingSelected;
+    if (ordered.length === 0) {
+      Alert.alert('Tracking', 'Select at least one thing to track.');
+      return;
+    }
+
+    if (ordered.includes('steps')) {
+      const n = Number(editStepsGoal);
+      if (!Number.isFinite(n) || n <= 0) {
+        Alert.alert('Invalid steps goal', 'Please enter a positive daily steps goal.');
+        return;
+      }
+    }
+    if (ordered.includes('water')) {
+      const w = Number(editWaterGoal);
+      if (!Number.isFinite(w) || w <= 0) {
+        Alert.alert('Invalid water goal', 'Please enter a positive number of cups per day.');
+        return;
+      }
+    }
+
+    if (ordered.includes('meals')) {
+      if (editMeals.length === 0) {
+        Alert.alert('Meals', 'Add at least one meal slot or turn off Meals tracking.');
+        return;
+      }
+      if (editMeals.some((m) => !m.title.trim())) {
+        Alert.alert('Meals', 'Enter a title for every meal slot.');
+        return;
+      }
+    }
+
+    const pairs: [string, string][] = [[TRACKING_CONFIG_KEY, JSON.stringify(ordered)]];
+
+    if (ordered.includes('meals')) {
+      const normalized = editMeals.map((m) => ({
+        ...m,
+        emoji: (m.emoji || '🍽️').trim(),
+        title: m.title.trim(),
+        time: m.time.trim(),
+        intention: m.intention.trim(),
+      }));
+      pairs.push([MEAL_PLAN_STORAGE_KEY, JSON.stringify(normalized)]);
+    } else {
+      pairs.push([MEAL_PLAN_STORAGE_KEY, JSON.stringify([])]);
+    }
+
+    if (ordered.includes('steps')) {
+      pairs.push([STEPS_GOAL_KEY, String(Math.floor(Number(editStepsGoal)))]);
+    }
+    if (ordered.includes('workout')) {
+      pairs.push([WORKOUT_LABEL_KEY, editWorkoutLabel.trim()]);
+    }
+    if (ordered.includes('water')) {
+      pairs.push([WATER_GOAL_KEY, String(Math.floor(Number(editWaterGoal)))]);
+    }
+    if (ordered.includes('supplements')) {
+      pairs.push([SUPPLEMENT_LIST_KEY, JSON.stringify([])]);
+    }
+    if (ordered.includes('custom')) {
+      const items = editCustomItems
+        .filter((c) => c.label.trim())
+        .map((c) => ({ label: c.label.trim(), emoji: c.emoji }));
+      pairs.push([CUSTOM_ITEMS_KEY, JSON.stringify(items)]);
+    }
+
+    const removeKeys: string[] = [];
+    if (!ordered.includes('steps')) removeKeys.push(STEPS_GOAL_KEY);
+    if (!ordered.includes('workout')) removeKeys.push(WORKOUT_LABEL_KEY);
+    if (!ordered.includes('water')) removeKeys.push(WATER_GOAL_KEY);
+    if (!ordered.includes('supplements')) removeKeys.push(SUPPLEMENT_LIST_KEY);
+    if (!ordered.includes('custom')) removeKeys.push(CUSTOM_ITEMS_KEY);
+
+    try {
+      await AsyncStorage.multiSet(pairs);
+      if (removeKeys.length > 0) {
+        await AsyncStorage.multiRemove(removeKeys);
+      }
+      setEditPlanVisible(false);
+    } catch (e) {
+      Alert.alert(
+        'Save failed',
+        e instanceof Error ? e.message : 'Could not save your plan.'
+      );
+    }
+  };
+
   const saveGoal = async () => {
     const v = goalDraft.trim() || 'Your best self';
     await AsyncStorage.setItem('user_goal', v);
@@ -142,41 +343,45 @@ export default function SettingsScreen({ openEditPlanRef }: Props) {
     setEditing(null);
   };
 
-  const runFullReset = async () => {
-    try {
-      const allKeys = await AsyncStorage.getAllKeys();
-      const patternKeys = allKeys.filter(storageKeyMatchesDailyDataPattern);
-      const toRemove = [...new Set([...RESET_STATIC_KEYS, ...patternKeys, ...allKeys])];
-      if (toRemove.length > 0) {
-        await AsyncStorage.multiRemove(toRemove);
-      }
-    } catch (e) {
-      Alert.alert(
-        'Reset failed',
-        e instanceof Error ? e.message : 'Could not clear storage.'
-      );
-      return;
-    }
-    try {
-      DevSettings.reload();
-    } catch {
-      Alert.alert(
-        'Reset complete',
-        'All data has been cleared. Please restart the app to open onboarding.'
-      );
-    }
-  };
-
   const confirmReset = () => {
     Alert.alert(
-      'Are you sure?',
-      'This will erase all saved app data and return you to onboarding after the app reloads.',
+      'Reset everything?',
+      'This will delete all your data and restart onboarding.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Reset',
           style: 'destructive',
-          onPress: () => void runFullReset(),
+          onPress: () =>
+            void (async () => {
+              try {
+                const keys = await AsyncStorage.getAllKeys();
+                await AsyncStorage.multiRemove(keys);
+              } catch (e) {
+                Alert.alert(
+                  'Reset failed',
+                  e instanceof Error ? e.message : 'Could not clear storage.'
+                );
+                return;
+              }
+              try {
+                (
+                  navigation as unknown as {
+                    reset?: (s: { index: number; routes: { name: string }[] }) => void;
+                  }
+                ).reset?.({ index: 0, routes: [{ name: 'Onboarding' }] });
+              } catch {
+                /* Onboarding is not in this navigator tree */
+              }
+              try {
+                DevSettings.reload();
+              } catch {
+                Alert.alert(
+                  'Reset complete',
+                  'All data has been cleared. Please force-quit and reopen the app to see onboarding.'
+                );
+              }
+            })(),
         },
       ]
     );
@@ -185,35 +390,35 @@ export default function SettingsScreen({ openEditPlanRef }: Props) {
   const clearToday = () => {
     Alert.alert(
       "Clear today's data?",
-      'This removes today’s check-ins, journal, water, steps, workout answers, and related entries. Meal photo notes in storage are not removed.',
+      'This removes every stored value whose key includes today’s date.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Clear',
           style: 'destructive',
-          onPress: () => void doClearToday(),
+          onPress: () =>
+            void (async () => {
+              try {
+                const today = new Date().toISOString().split('T')[0];
+                const allKeys = await AsyncStorage.getAllKeys();
+                const todayKeys = allKeys.filter((k) => k.includes(today));
+                if (todayKeys.length > 0) {
+                  await AsyncStorage.multiRemove(todayKeys);
+                }
+              } catch (e) {
+                Alert.alert(
+                  'Could not clear',
+                  e instanceof Error ? e.message : 'Something went wrong.'
+                );
+              }
+            })(),
         },
       ]
     );
   };
 
-  const doClearToday = async () => {
-    try {
-      await AsyncStorage.multiRemove(todayKeysToRemove());
-    } catch (e) {
-      Alert.alert(
-        'Could not clear',
-        e instanceof Error ? e.message : 'Something went wrong.'
-      );
-    }
-  };
-
-  const openPlan = () => {
-    openEditPlanRef.current?.();
-  };
-
   const openTrackRecord = () => {
-    navigation.getParent()?.navigate('History' as never);
+    navigation.dispatch(CommonActions.navigate({ name: 'History' }));
   };
 
   return (
@@ -226,7 +431,7 @@ export default function SettingsScreen({ openEditPlanRef }: Props) {
         <Text style={styles.screenTitle}>Settings</Text>
 
         <Text style={styles.sectionTitle}>My Plan</Text>
-        <Pressable style={styles.row} onPress={openPlan}>
+        <Pressable style={styles.row} onPress={openEditPlanModal}>
           <Text style={styles.rowLabel}>Edit Plan</Text>
           <Text style={styles.chevron}>›</Text>
         </Pressable>
@@ -307,6 +512,160 @@ export default function SettingsScreen({ openEditPlanRef }: Props) {
         </Pressable>
         <Text style={styles.version}>Version 1.0.0</Text>
       </ScrollView>
+
+      <Modal visible={editPlanVisible} animationType="slide" presentationStyle="fullScreen">
+        <SafeAreaView style={styles.modalSafe} edges={['top', 'bottom']}>
+          <View style={styles.modalHeader}>
+            <Pressable onPress={dismissEditPlan} hitSlop={12}>
+              <Text style={styles.modalHeaderBtn}>Cancel</Text>
+            </Pressable>
+            <Text style={styles.modalTitle}>Edit plan</Text>
+            <Pressable onPress={() => void saveEditPlan()} hitSlop={12}>
+              <Text style={styles.modalHeaderBtnPrimary}>Save</Text>
+            </Pressable>
+          </View>
+
+          <ScrollView
+            style={styles.modalScroll}
+            contentContainerStyle={styles.modalScrollContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Text style={styles.modalSectionLabel}>Tracking</Text>
+            <View style={styles.trackingGrid}>
+              {TRACKING_GRID_ITEMS.map((item) => {
+                const on = editTrackingSelected.includes(item.id);
+                return (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => toggleEditTracking(item.id)}
+                    style={[styles.trackingCard, on && styles.trackingCardOn]}
+                  >
+                    <Text style={styles.trackingEmoji}>{item.emoji}</Text>
+                    <Text style={[styles.trackingLabel, on && styles.trackingLabelOn]}>
+                      {item.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {editTrackingSelected.includes('meals') ? (
+              <View style={styles.configBlock}>
+                <Text style={styles.modalSectionLabel}>Meals</Text>
+                {editMeals.map((meal, idx) => (
+                  <View key={meal.id} style={styles.mealCard}>
+                    <View style={styles.mealCardHeader}>
+                      <Text style={styles.mealCardTitle}>Slot {idx + 1}</Text>
+                      <Pressable onPress={() => removeMealSlot(idx)} hitSlop={8}>
+                        <Text style={styles.deleteText}>Delete</Text>
+                      </Pressable>
+                    </View>
+                    <TextInput
+                      value={meal.title}
+                      onChangeText={(t) => updateMealField(idx, 'title', t)}
+                      placeholder="Title"
+                      placeholderTextColor="#9CA3AF"
+                      style={styles.input}
+                    />
+                    <TextInput
+                      value={meal.time}
+                      onChangeText={(t) => updateMealField(idx, 'time', t)}
+                      placeholder="Time"
+                      placeholderTextColor="#9CA3AF"
+                      style={styles.input}
+                    />
+                    <TextInput
+                      value={meal.intention}
+                      onChangeText={(t) => updateMealField(idx, 'intention', t)}
+                      placeholder="Intention"
+                      placeholderTextColor="#9CA3AF"
+                      style={[styles.input, styles.inputShortMultiline]}
+                      multiline
+                    />
+                  </View>
+                ))}
+                <Pressable style={styles.addSlotBtn} onPress={addMealSlot}>
+                  <Text style={styles.addSlotBtnText}>+ Add meal slot</Text>
+                </Pressable>
+              </View>
+            ) : null}
+
+            {editTrackingSelected.includes('steps') ? (
+              <View style={styles.configBlock}>
+                <Text style={styles.modalSectionLabel}>Steps goal</Text>
+                <TextInput
+                  value={editStepsGoal}
+                  onChangeText={setEditStepsGoal}
+                  placeholder="Daily steps"
+                  placeholderTextColor="#9CA3AF"
+                  keyboardType="number-pad"
+                  style={styles.input}
+                />
+              </View>
+            ) : null}
+
+            {editTrackingSelected.includes('workout') ? (
+              <View style={styles.configBlock}>
+                <Text style={styles.modalSectionLabel}>Workout label</Text>
+                <TextInput
+                  value={editWorkoutLabel}
+                  onChangeText={setEditWorkoutLabel}
+                  placeholder="e.g. Strength training"
+                  placeholderTextColor="#9CA3AF"
+                  style={styles.input}
+                />
+              </View>
+            ) : null}
+
+            {editTrackingSelected.includes('water') ? (
+              <View style={styles.configBlock}>
+                <Text style={styles.modalSectionLabel}>Water (cups per day)</Text>
+                <TextInput
+                  value={editWaterGoal}
+                  onChangeText={setEditWaterGoal}
+                  placeholder="Cups"
+                  placeholderTextColor="#9CA3AF"
+                  keyboardType="number-pad"
+                  style={styles.input}
+                />
+              </View>
+            ) : null}
+
+            {editTrackingSelected.includes('custom') ? (
+              <View style={styles.configBlock}>
+                <Text style={styles.modalSectionLabel}>Custom items</Text>
+                {editCustomItems.map((row, idx) => (
+                  <View key={`custom-${idx}`} style={styles.customRow}>
+                    <Pressable
+                      style={styles.customEmojiBtn}
+                      onPress={() => cycleEditCustomEmoji(idx)}
+                    >
+                      <Text style={styles.customEmojiText}>{row.emoji}</Text>
+                    </Pressable>
+                    <TextInput
+                      value={row.label}
+                      onChangeText={(t) =>
+                        setEditCustomItems((prev) =>
+                          prev.map((r, i) => (i === idx ? { ...r, label: t } : r))
+                        )
+                      }
+                      placeholder="Label"
+                      placeholderTextColor="#9CA3AF"
+                      style={[styles.input, styles.customLabelInput]}
+                    />
+                    <Pressable onPress={() => removeCustomRow(idx)} hitSlop={8}>
+                      <Text style={styles.deleteText}>×</Text>
+                    </Pressable>
+                  </View>
+                ))}
+                <Pressable style={styles.addSlotBtn} onPress={addCustomRow}>
+                  <Text style={styles.addSlotBtnText}>+ Add custom item</Text>
+                </Pressable>
+              </View>
+            ) : null}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -384,6 +743,10 @@ const styles = StyleSheet.create({
     minHeight: 100,
     textAlignVertical: 'top',
   },
+  inputShortMultiline: {
+    minHeight: 72,
+    textAlignVertical: 'top',
+  },
   hint: {
     color: GREY,
     fontSize: 12,
@@ -408,5 +771,142 @@ const styles = StyleSheet.create({
     marginTop: 12,
     marginBottom: 8,
     fontFamily: FONT_BODY,
+  },
+  modalSafe: {
+    flex: 1,
+    backgroundColor: BG,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#3F3F3F',
+  },
+  modalTitle: {
+    color: TEXT,
+    fontSize: 17,
+    fontFamily: FONT_BOLD,
+  },
+  modalHeaderBtn: {
+    color: GREY,
+    fontSize: 16,
+    fontFamily: FONT_SEMIBOLD,
+    paddingHorizontal: 8,
+  },
+  modalHeaderBtnPrimary: {
+    color: ACCENT,
+    fontSize: 16,
+    fontFamily: FONT_BOLD,
+    paddingHorizontal: 8,
+  },
+  modalScroll: {
+    flex: 1,
+  },
+  modalScrollContent: {
+    padding: 16,
+    paddingBottom: 40,
+  },
+  modalSectionLabel: {
+    color: ACCENT,
+    fontFamily: FONT_BOLD,
+    fontSize: 13,
+    marginBottom: 10,
+    marginTop: 8,
+  },
+  trackingGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 8,
+  },
+  trackingCard: {
+    width: '31%',
+    minWidth: '30%',
+    flexGrow: 1,
+    backgroundColor: ROW_BG,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  trackingCardOn: {
+    borderColor: ACCENT,
+    backgroundColor: '#3A2A24',
+  },
+  trackingEmoji: {
+    fontSize: 26,
+    marginBottom: 6,
+  },
+  trackingLabel: {
+    color: GREY,
+    fontSize: 12,
+    fontFamily: FONT_SEMIBOLD,
+    textAlign: 'center',
+  },
+  trackingLabelOn: {
+    color: TEXT,
+  },
+  configBlock: {
+    marginBottom: 16,
+  },
+  mealCard: {
+    backgroundColor: ROW_BG,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+  },
+  mealCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  mealCardTitle: {
+    color: TEXT,
+    fontFamily: FONT_BOLD,
+    fontSize: 14,
+  },
+  deleteText: {
+    color: '#EF4444',
+    fontFamily: FONT_SEMIBOLD,
+    fontSize: 14,
+  },
+  addSlotBtn: {
+    alignSelf: 'flex-start',
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+  },
+  addSlotBtnText: {
+    color: ACCENT,
+    fontFamily: FONT_BOLD,
+    fontSize: 15,
+  },
+  customRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+    gap: 8,
+  },
+  customEmojiBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: ROW_BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#3F3F3F',
+  },
+  customEmojiText: {
+    fontSize: 24,
+  },
+  customLabelInput: {
+    flex: 1,
+    marginBottom: 0,
   },
 });

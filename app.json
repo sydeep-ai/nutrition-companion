@@ -34,7 +34,8 @@
     "extra": {
       "eas": {
         "projectId": "671da47f-c257-4ce0-a2d7-dbe50b323f75"
-      }
+      },
+      "anthropicApiKey": "EXPO_PUBLIC_ANTHROPIC_API_KEY"
     },
     "plugins": [
       "expo-font"

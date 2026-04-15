@@ -1,6 +1,29 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 
 const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
+
+const EXTRA_KEY_SENTINEL = 'EXPO_PUBLIC_ANTHROPIC_API_KEY';
+
+/** Prefer env (Metro inlines EXPO_PUBLIC_*); fall back to app extra from app.config.js / EAS. */
+function getAnthropicApiKey(): string {
+  const fromEnv = String(process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY ?? '').trim();
+  console.log('Key length:', (process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY || '').length);
+
+  if (fromEnv.length > 0) {
+    return fromEnv;
+  }
+
+  const rawExtra = Constants.expoConfig?.extra?.anthropicApiKey;
+  if (typeof rawExtra === 'string') {
+    const t = rawExtra.trim();
+    if (t.length > 0 && t !== EXTRA_KEY_SENTINEL) {
+      return t;
+    }
+  }
+
+  return '';
+}
 
 const TRACKING_CONFIG_KEY = 'tracking_config';
 const MEAL_PLAN_STORAGE_KEY = 'meal_plan';
@@ -251,12 +274,7 @@ function buildOnboardingUserPreamble(g: Record<string, string | null>): string {
  * Calls Anthropic Messages API for the daily check-in coach response.
  */
 export async function requestDayCheckIn(userMessage: string): Promise<string> {
-  const rawKey = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY;
-  if (rawKey == null || String(rawKey).trim() === '') {
-    throw new Error(
-      'API key not configured. Add EXPO_PUBLIC_ANTHROPIC_API_KEY to your .env file.'
-    );
-  }
+  const apiKey = getAnthropicApiKey();
 
   const entries = await AsyncStorage.multiGet([...ONBOARDING_KEYS]);
   const g = Object.fromEntries(entries) as Record<string, string | null>;
@@ -295,7 +313,7 @@ export async function requestDayCheckIn(userMessage: string): Promise<string> {
   const response = await fetch(ANTHROPIC_MESSAGES_URL, {
     method: 'POST',
     headers: {
-      'x-api-key': process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY,
+      'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
     },
