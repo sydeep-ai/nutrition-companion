@@ -1,12 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ImageManipulator from 'expo-image-manipulator';
-import * as MediaLibrary from 'expo-media-library';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Dimensions,
-  Image,
   InputAccessoryView,
   Keyboard,
   KeyboardAvoidingView,
@@ -23,7 +20,6 @@ import {
   View,
 } from 'react-native';
 import { FONT_BODY, FONT_SEMIBOLD, FONT_BOLD, FONT_EXTRA } from '../constants/fonts';
-import { captureRef } from 'react-native-view-shot';
 import MealCard, { MealCardLog } from '../components/MealCard';
 import { DEFAULT_MEAL_PLAN, parseMealPlanFromStorage, PlanMeal } from '../data/defaultMealPlan';
 import { requestDayCheckIn } from '../services/claude';
@@ -154,6 +150,177 @@ function formatCommitmentDayLine(planStartRaw: string | null, targetDaysRaw: str
   const y =
     Number.isFinite(target) && target > 0 ? String(target) : 'unknown target length';
   return `Today is day ${dayNum} of ${y} in their commitment.`;
+}
+
+function parseIntentionsLinesForShare(raw: string | null): string {
+  try {
+    const arr = raw ? (JSON.parse(raw) as unknown) : [];
+    if (!Array.isArray(arr) || arr.length === 0) {
+      return '(none recorded)';
+    }
+    const trimmed = arr.map((x) => String(x).trim()).filter(Boolean);
+    if (trimmed.length === 0) {
+      return '(none recorded)';
+    }
+    return trimmed.map((s, i) => `${i + 1}. ${s}`).join('\n');
+  } catch {
+    return '(could not parse intentions)';
+  }
+}
+
+function commitmentDayXForShare(
+  planStartRaw: string | null,
+  targetDaysRaw: string | null
+): { dayX: number; targetLabel: string } {
+  const target = parseInt(String(targetDaysRaw ?? '').trim(), 10);
+  const targetLabel =
+    Number.isFinite(target) && target > 0 ? String(target) : '?';
+  if (!planStartRaw?.trim()) {
+    return { dayX: 1, targetLabel };
+  }
+  const start = new Date(planStartRaw);
+  if (Number.isNaN(start.getTime())) {
+    return { dayX: 1, targetLabel };
+  }
+  const startDay = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const now = new Date();
+  const todayDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffDays = Math.floor((todayDay.getTime() - startDay.getTime()) / 86400000) + 1;
+  const dayX = Math.max(1, diffDays);
+  return { dayX, targetLabel };
+}
+
+function ynEmoji(v: 'yes' | 'no' | null): string {
+  if (v === 'yes') return '✅';
+  if (v === 'no') return '❌';
+  return '⚪️';
+}
+
+function buildShareMyDayText(opts: {
+  dateHeading: string;
+  userName: string;
+  userGoal: string;
+  intentionsBlock: string;
+  dayX: number;
+  targetLabel: string;
+  trackingConfig: TrackingId[];
+  meals: PlanMeal[];
+  checkedMealIds: Set<string>;
+  stepsGoal: string;
+  stepsAnswer: 'yes' | 'no' | null;
+  workoutLabel: string;
+  workoutAnswer: 'yes' | 'no' | null;
+  waterCups: number;
+  waterGoal: number;
+  supplementList: SupplementRow[];
+  supplementChecks: Record<number, boolean>;
+  journalText: string;
+  checkinText: string | null;
+  overallPct: number;
+  rewardName: string;
+}): string {
+  const lines: string[] = [];
+  lines.push('🍽️ My Nutrition Day');
+  lines.push(`📅 ${opts.dateHeading}`);
+  lines.push('');
+  lines.push('👤 About me');
+  lines.push(`Name: ${opts.userName || 'Friend'}`);
+  lines.push(`Goal: ${opts.userGoal || '(not set)'}`);
+  lines.push('');
+  lines.push('🎯 Intentions');
+  lines.push(opts.intentionsBlock);
+  lines.push('');
+  lines.push('📆 Commitment');
+  lines.push(`Day ${opts.dayX} of ${opts.targetLabel}`);
+  lines.push(
+    `🏆 Reward progress: ${opts.dayX} of ${opts.targetLabel} days toward ${opts.rewardName || 'your reward'}`
+  );
+  lines.push('');
+
+  if (opts.trackingConfig.includes('meals')) {
+    lines.push('🍳 Meals');
+    if (opts.meals.length === 0) {
+      lines.push('(No meals in your plan for today.)');
+      lines.push('');
+    } else {
+      for (const m of opts.meals) {
+        const ticked = opts.checkedMealIds.has(m.id);
+        const title = `${m.emoji} ${m.title}`.trim() || 'Meal';
+        const time = m.time?.trim() || '(no time)';
+        const intention = m.intention?.trim() || '(no intention set)';
+        lines.push(`• ${title} — ${ticked ? '✅' : '❌'}`);
+        lines.push(`  ⏰ ${time}`);
+        lines.push(`  🥗 Intention: ${intention}`);
+      }
+      lines.push('');
+    }
+  }
+
+  if (opts.trackingConfig.includes('steps')) {
+    lines.push('👟 Steps');
+    lines.push(
+      `${ynEmoji(opts.stepsAnswer)} ${opts.stepsAnswer === 'yes' ? 'Hit goal' : opts.stepsAnswer === 'no' ? 'Missed' : 'Not logged yet'} — goal: ${opts.stepsGoal} steps`
+    );
+    lines.push('');
+  }
+
+  if (opts.trackingConfig.includes('workout')) {
+    const label = opts.workoutLabel.trim() || 'Workout';
+    lines.push('💪 Workout');
+    lines.push(
+      `${ynEmoji(opts.workoutAnswer)} ${opts.workoutAnswer === 'yes' ? 'Done' : opts.workoutAnswer === 'no' ? 'Not done' : 'Not logged yet'} — ${label}`
+    );
+    lines.push('');
+  }
+
+  if (opts.trackingConfig.includes('water')) {
+    lines.push('💧 Water');
+    lines.push(`${opts.waterCups} of ${opts.waterGoal} cups`);
+    lines.push('');
+  }
+
+  if (opts.trackingConfig.includes('supplements')) {
+    lines.push('💊 Supplements');
+    const rows = opts.supplementList.filter((r) => r.name.trim() || r.timing.trim());
+    if (rows.length === 0) {
+      lines.push('No supplements in your list — add names in plan settings if you use this.');
+    } else {
+      let done = 0;
+      opts.supplementList.forEach((row, i) => {
+        if (!row.name.trim() && !row.timing.trim()) {
+          return;
+        }
+        const ok = opts.supplementChecks[i] === true;
+        if (ok) {
+          done += 1;
+        }
+        const name = row.name.trim() || 'Supplement';
+        lines.push(`• ${name}${row.timing.trim() ? ` (${row.timing.trim()})` : ''} — ${ok ? '✅' : '❌'}`);
+      });
+      lines.push(`Overall: ${done === rows.length && rows.length > 0 ? '✅ All done' : '❌ Not all done'} (${done}/${rows.length})`);
+    }
+    lines.push('');
+  }
+
+  lines.push('📔 Journal');
+  lines.push(opts.journalText.trim() || '(empty today)');
+  lines.push('');
+
+  lines.push('🤖 AI check-in');
+  if (opts.checkinText?.trim()) {
+    lines.push(opts.checkinText.trim());
+  } else {
+    lines.push('(No AI review saved for today yet.)');
+  }
+  lines.push('');
+
+  lines.push('📊 Overall completion');
+  lines.push(`${opts.overallPct}% of today's tracked items`);
+  lines.push('');
+  lines.push('—');
+  lines.push('Shared from Nutrition Companion');
+
+  return lines.join('\n');
 }
 
 async function buildDayCheckinUserMessage(todayKey: string): Promise<string> {
@@ -349,7 +516,6 @@ type Props = {
 };
 
 export default function TodayScreen({ onPressHome }: Props) {
-  const summaryCaptureRef = useRef<View>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const journalInputRef = useRef<TextInput>(null);
   const journalSectionY = useRef(0);
@@ -358,9 +524,7 @@ export default function TodayScreen({ onPressHome }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [mealLogs, setMealLogs] = useState<MealLogsState>({});
   const [userName, setUserName] = useState('');
-  const [summaryLogs, setSummaryLogs] = useState<MealLogsState>({});
   const [isSharing, setIsSharing] = useState(false);
-  const [summaryCaptureReady, setSummaryCaptureReady] = useState(false);
   const [journalText, setJournalText] = useState('');
   const [journalInputHeight, setJournalInputHeight] = useState(100);
   const [journalExpanded, setJournalExpanded] = useState(false);
@@ -539,10 +703,15 @@ export default function TodayScreen({ onPressHome }: Props) {
       setCheckinSaved({ text, checkedInAt });
       setCheckinCardExpanded(true);
     } catch (e) {
-      Alert.alert(
-        'Check-in failed',
-        e instanceof Error ? e.message : 'Something went wrong. Try again.'
-      );
+      const msg =
+        e instanceof Error
+          ? e.message
+          : typeof e === 'string'
+            ? e
+            : e != null && typeof e === 'object' && 'message' in e && typeof (e as { message: unknown }).message === 'string'
+              ? (e as { message: string }).message
+              : JSON.stringify(e);
+      Alert.alert('Check-in failed', msg || 'Something went wrong. Try again.');
     } finally {
       setCheckinLoading(false);
     }
@@ -986,64 +1155,90 @@ export default function TodayScreen({ onPressHome }: Props) {
     }
 
     setIsSharing(true);
-    const todayLabel = new Date().toLocaleDateString(undefined, {
+    const dateHeading = new Date().toLocaleDateString(undefined, {
       weekday: 'long',
       month: 'short',
       day: 'numeric',
       year: 'numeric',
     });
 
-    const compressLogsEntries = await Promise.all(
-      Object.entries(mealLogs).map(async ([mealId, log]) => {
-        if (!log?.photoUri) {
-          return [mealId, log] as const;
-        }
-
-        try {
-          const compressed = await ImageManipulator.manipulateAsync(
-            log.photoUri,
-            [{ resize: { width: 800 } }],
-            {
-              compress: 0.8,
-              format: ImageManipulator.SaveFormat.JPEG,
-            }
-          );
-          return [mealId, { ...log, photoUri: compressed.uri }] as const;
-        } catch {
-          return [mealId, log] as const;
-        }
-      })
-    );
-
-    const preparedLogs: MealLogsState = Object.fromEntries(compressLogsEntries);
-    setSummaryLogs(preparedLogs);
-    setSummaryCaptureReady(true);
-
     try {
-      const mediaPermission = await MediaLibrary.requestPermissionsAsync();
-      const canSaveToPhotos = mediaPermission.status === 'granted';
+      const storeEntries = await AsyncStorage.multiGet([
+        'user_name',
+        'user_goal',
+        'user_intentions',
+        'plan_start_date',
+        'target_days',
+        'reward_name',
+      ]);
+      const sg = Object.fromEntries(storeEntries) as Record<string, string | null>;
+      const name = (sg.user_name?.trim() || userName.trim() || 'Friend').trim();
+      const goal = sg.user_goal?.trim() || '(not set)';
+      const intentionsBlock = parseIntentionsLinesForShare(sg.user_intentions ?? null);
+      const { dayX, targetLabel } = commitmentDayXForShare(sg.plan_start_date, sg.target_days);
+      const rewardName = sg.reward_name?.trim() || 'your reward';
 
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      const checkedSet = new Set(checkedIds);
+      const overallPct =
+        progressStats.total > 0
+          ? Math.min(100, Math.max(0, Math.round(progressStats.fraction * 100)))
+          : 0;
 
-      const uri = await captureRef(summaryCaptureRef, {
-        format: 'png',
-        quality: 1,
+      const message = buildShareMyDayText({
+        dateHeading,
+        userName: name,
+        userGoal: goal,
+        intentionsBlock,
+        dayX,
+        targetLabel,
+        trackingConfig,
+        meals,
+        checkedMealIds: checkedSet,
+        stepsGoal,
+        stepsAnswer,
+        workoutLabel,
+        workoutAnswer,
+        waterCups,
+        waterGoal,
+        supplementList,
+        supplementChecks,
+        journalText,
+        checkinText: checkinSaved?.text ?? null,
+        overallPct,
+        rewardName,
       });
 
-      if (canSaveToPhotos) {
-        await MediaLibrary.saveToLibraryAsync(uri);
-        Alert.alert('Saved', 'Your daily summary was saved to Photos.');
-      }
-
-      await Share.share({
-        url: uri,
-        message: `My Nutrition Day — ${todayLabel}`,
-      });
+      await Share.share({ message });
+    } catch (e) {
+      const msg =
+        e instanceof Error
+          ? e.message
+          : typeof e === 'string'
+            ? e
+            : 'Could not build or share your summary.';
+      Alert.alert('Share failed', msg);
     } finally {
-      setSummaryCaptureReady(false);
       setIsSharing(false);
     }
-  }, [checkedIds, isSharing, mealLogs, meals]);
+  }, [
+    isSharing,
+    userName,
+    checkedIds,
+    progressStats.total,
+    progressStats.fraction,
+    trackingConfig,
+    meals,
+    stepsGoal,
+    stepsAnswer,
+    workoutLabel,
+    workoutAnswer,
+    waterCups,
+    waterGoal,
+    supplementList,
+    supplementChecks,
+    journalText,
+    checkinSaved,
+  ]);
 
   return (
     <View style={styles.screen}>
@@ -1524,55 +1719,6 @@ export default function TodayScreen({ onPressHome }: Props) {
           </ScrollView>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
-
-      <View style={styles.hiddenSummaryRoot} pointerEvents="none">
-        {summaryCaptureReady ? (
-          <View style={styles.summaryCard} collapsable={false} ref={summaryCaptureRef}>
-            <Text style={styles.summaryTitle}>My Nutrition Day</Text>
-            <Text style={styles.summaryDate}>
-              {new Date().toLocaleDateString(undefined, {
-                weekday: 'long',
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-              })}
-            </Text>
-
-            <Text style={styles.summaryMeta}>
-              Meals completed: {checkedIds.length}/{meals.length}
-            </Text>
-            <View style={styles.summaryProgressTrack}>
-              <View
-                style={[
-                  styles.summaryProgressFill,
-                  { width: `${meals.length > 0 ? (checkedIds.length / meals.length) * 100 : 0}%` },
-                ]}
-              />
-            </View>
-
-            {meals.map((meal) => {
-              const done = checkedIds.includes(meal.id);
-              const log = summaryLogs[meal.id];
-              const note = log?.note?.trim();
-              const title = `${meal.emoji} ${meal.title}`.trim();
-
-              return (
-                <View key={`summary-${meal.id}`} style={styles.summaryMealRow}>
-                  <Text style={styles.summaryMealLine}>
-                    {done ? '✅' : '❌'} {title} ({meal.time})
-                  </Text>
-                  {log?.photoUri ? (
-                    <Image source={{ uri: log.photoUri }} style={styles.summaryThumb} />
-                  ) : null}
-                  {note ? <Text style={styles.summaryNote}>Note: {note}</Text> : null}
-                </View>
-              );
-            })}
-
-            <Text style={styles.summaryFooter}>Water: Not tracked yet</Text>
-          </View>
-        ) : null}
-      </View>
     </View>
   );
 }
@@ -1952,75 +2098,5 @@ const styles = StyleSheet.create({
     fontFamily: FONT_BODY,
     color: '#FAFAFA',
     backgroundColor: '#252525',
-  },
-  hiddenSummaryRoot: {
-    position: 'absolute',
-    left: -9999,
-    top: 0,
-    width: 360,
-  },
-  summaryCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 2,
-    borderColor: '#F1C3B2',
-  },
-  summaryTitle: {
-    fontSize: 22,
-    fontFamily: FONT_EXTRA,
-    color: '#1A1A1A',
-  },
-  summaryDate: {
-    marginTop: 2,
-    fontSize: 12,
-    fontFamily: FONT_BODY,
-    color: '#4B5563',
-  },
-  summaryMeta: {
-    marginTop: 12,
-    fontSize: 13,
-    fontFamily: FONT_SEMIBOLD,
-    color: '#8A3A20',
-  },
-  summaryProgressTrack: {
-    marginTop: 8,
-    height: 10,
-    borderRadius: 999,
-    backgroundColor: '#E5E7EB',
-    overflow: 'hidden',
-  },
-  summaryProgressFill: {
-    height: '100%',
-    backgroundColor: ACCENT,
-  },
-  summaryMealRow: {
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#F3F4F6',
-  },
-  summaryMealLine: {
-    color: '#111827',
-    fontSize: 13,
-    fontFamily: FONT_SEMIBOLD,
-  },
-  summaryThumb: {
-    marginTop: 6,
-    width: 84,
-    height: 84,
-    borderRadius: 8,
-  },
-  summaryNote: {
-    marginTop: 5,
-    color: '#374151',
-    fontSize: 12,
-    fontFamily: FONT_BODY,
-  },
-  summaryFooter: {
-    marginTop: 14,
-    color: '#4B5563',
-    fontSize: 12,
-    fontFamily: FONT_BODY,
   },
 });
