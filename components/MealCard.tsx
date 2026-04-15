@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { FONT_BODY, FONT_BOLD, FONT_SEMIBOLD } from '../constants/fonts';
 
 const ACCENT = '#1D9E75';
 
@@ -225,12 +226,12 @@ const styles = StyleSheet.create({
   checkmark: {
     color: '#FFFFFF',
     fontSize: 14,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     lineHeight: 16,
   },
   mealTitle: {
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
     color: '#F3F4F6',
   },
   mealTitleRow: {
@@ -248,6 +249,7 @@ const styles = StyleSheet.create({
   mealTime: {
     marginTop: 2,
     fontSize: 13,
+    fontFamily: FONT_BODY,
     color: '#9CA3AF',
   },
   cameraButton: {
@@ -268,6 +270,7 @@ const styles = StyleSheet.create({
     color: '#D1D5DB',
     fontSize: 14,
     lineHeight: 20,
+    fontFamily: FONT_BODY,
   },
   logSection: {
     marginTop: 12,
@@ -295,7 +298,7 @@ const styles = StyleSheet.create({
   deletePhotoButtonText: {
     color: '#FFFFFF',
     fontSize: 12,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     lineHeight: 14,
   },
   noteInput: {
@@ -307,11 +310,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 13,
+    fontFamily: FONT_BODY,
     color: '#F3F4F6',
   },
   timestamp: {
     marginTop: 4,
     fontSize: 11,
+    fontFamily: FONT_BODY,
     color: '#9CA3AF',
   },
 });

@@ -1,6 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FONT_EXTRA, FONT_SEMIBOLD } from '../constants/fonts';
 
 const ACCENT = '#D85A30';
 
@@ -80,7 +81,7 @@ const styles = StyleSheet.create({
   kicker: {
     color: 'rgba(255,255,255,0.85)',
     fontSize: 14,
-    fontWeight: '700',
+    fontFamily: FONT_SEMIBOLD,
     letterSpacing: 0.7,
     textTransform: 'uppercase',
     marginBottom: 16,
@@ -90,7 +91,7 @@ const styles = StyleSheet.create({
     fontSize: 32,
     lineHeight: 43,
     textAlign: 'center',
-    fontWeight: '700',
+    fontFamily: FONT_EXTRA,
   },
   button: {
     backgroundColor: ACCENT,
@@ -102,7 +103,7 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#FFFFFF',
     fontSize: 17,
-    fontWeight: '800',
+    fontFamily: FONT_EXTRA,
   },
   decorCircleTop: {
     position: 'absolute',

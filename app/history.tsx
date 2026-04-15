@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { FONT_BODY, FONT_SEMIBOLD, FONT_EXTRA } from '../constants/fonts';
 import {
   collectHistoryDates,
   formatHistoryHeading,
@@ -132,12 +133,12 @@ const styles = StyleSheet.create({
   },
   backText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
     color: '#D1D5DB',
   },
   title: {
     fontSize: 21,
-    fontWeight: '700',
+    fontFamily: FONT_EXTRA,
     color: TEXT_PRIMARY,
     marginBottom: 20,
   },
@@ -152,6 +153,7 @@ const styles = StyleSheet.create({
     color: '#9CA3AF',
     fontStyle: 'italic',
     marginBottom: 16,
+    fontFamily: FONT_BODY,
   },
   card: {
     backgroundColor: SURFACE,
@@ -161,25 +163,27 @@ const styles = StyleSheet.create({
   },
   cardDate: {
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: FONT_SEMIBOLD,
     color: TEXT_PRIMARY,
   },
   cardMeals: {
     marginTop: 8,
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
     color: '#D1D5DB',
   },
   cardMovement: {
     marginTop: 6,
     fontSize: 14,
     color: '#D1D5DB',
+    fontFamily: FONT_BODY,
   },
   journalPreview: {
     marginTop: 10,
     fontSize: 13,
     color: '#9CA3AF',
     fontStyle: 'italic',
+    fontFamily: FONT_BODY,
   },
   journalFull: {
     marginTop: 10,
@@ -187,5 +191,6 @@ const styles = StyleSheet.create({
     color: '#E5E7EB',
     fontStyle: 'normal',
     lineHeight: 20,
+    fontFamily: FONT_BODY,
   },
 });

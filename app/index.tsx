@@ -22,6 +22,7 @@ import {
   UIManager,
   View,
 } from 'react-native';
+import { FONT_BODY, FONT_SEMIBOLD, FONT_BOLD, FONT_EXTRA } from '../constants/fonts';
 import { captureRef } from 'react-native-view-shot';
 import MealCard, { MealCardLog } from '../components/MealCard';
 import { DEFAULT_MEAL_PLAN, parseMealPlanFromStorage, PlanMeal } from '../data/defaultMealPlan';
@@ -1585,7 +1586,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 28,
-    fontWeight: '700',
+    fontFamily: FONT_EXTRA,
     color: '#FAFAFA',
   },
   headerTitleBlock: {
@@ -1628,7 +1629,7 @@ const styles = StyleSheet.create({
   avatarText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '800',
+    fontFamily: FONT_EXTRA,
   },
   progressWrap: {
     marginBottom: 16,
@@ -1641,7 +1642,7 @@ const styles = StyleSheet.create({
   progressText: {
     color: '#D1D5DB',
     fontSize: 13,
-    fontWeight: '500',
+    fontFamily: FONT_BODY,
   },
   progressTrack: {
     height: 10,
@@ -1692,12 +1693,13 @@ const styles = StyleSheet.create({
   journalTitleText: {
     flex: 1,
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: FONT_SEMIBOLD,
     color: ACCENT,
   },
   journalPreview: {
     marginTop: 2,
     fontSize: 13,
+    fontFamily: FONT_BODY,
     color: '#9CA3AF',
   },
   journalNudgeRow: {
@@ -1707,7 +1709,7 @@ const styles = StyleSheet.create({
   journalNudgeText: {
     fontSize: 13,
     color: '#9CA3AF',
-    fontWeight: '500',
+    fontFamily: FONT_BODY,
   },
   journalLogSection: {
     marginTop: 12,
@@ -1719,6 +1721,7 @@ const styles = StyleSheet.create({
     margin: 0,
     fontSize: 15,
     lineHeight: 20,
+    fontFamily: FONT_BODY,
     color: '#FAFAFA',
     textAlignVertical: 'top',
   },
@@ -1739,7 +1742,7 @@ const styles = StyleSheet.create({
   journalInputAccessoryDoneText: {
     color: ACCENT,
     fontSize: 17,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
   },
   checkinReviewButton: {
     width: '100%',
@@ -1755,7 +1758,7 @@ const styles = StyleSheet.create({
   checkinReviewButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
   },
   checkinLoadingCard: {
     width: '100%',
@@ -1771,7 +1774,7 @@ const styles = StyleSheet.create({
   checkinLoadingText: {
     color: '#9CA3AF',
     fontSize: 15,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
   },
   checkinResponseCard: {
     width: '100%',
@@ -1794,25 +1797,26 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     fontSize: 15,
-    fontWeight: '700',
+    fontFamily: FONT_SEMIBOLD,
     color: '#FAFAFA',
   },
   checkinToggleLink: {
     fontSize: 13,
     color: '#9CA3AF',
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
   },
   checkinResponseText: {
     marginTop: 12,
     color: '#FFFFFF',
     fontSize: 14,
     lineHeight: 22,
+    fontFamily: FONT_BODY,
   },
   checkinFooterTime: {
     marginTop: 14,
     fontSize: 12,
     color: '#9CA3AF',
-    fontWeight: '500',
+    fontFamily: FONT_BODY,
   },
   checkinRefreshWrap: {
     alignSelf: 'flex-start',
@@ -1821,7 +1825,7 @@ const styles = StyleSheet.create({
   checkinRefreshLink: {
     fontSize: 13,
     color: '#9CA3AF',
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
   },
   trackCard: {
     backgroundColor: '#2E2E2E',
@@ -1841,24 +1845,24 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     fontSize: 15,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     color: ACCENT,
   },
   trackSectionHeading: {
     fontSize: 15,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     color: ACCENT,
     marginBottom: 8,
   },
   trackWaterHeader: {
     fontSize: 15,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     color: ACCENT,
     marginBottom: 8,
   },
   trackQuestion: {
     fontSize: 13,
-    fontWeight: '500',
+    fontFamily: FONT_BODY,
     color: '#FAFAFA',
     flex: 1,
     minWidth: 0,
@@ -1892,7 +1896,7 @@ const styles = StyleSheet.create({
   },
   trackYnBtnLabel: {
     fontSize: 14,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     color: TRACK_BTN_TEXT_MUTED,
   },
   trackYnBtnLabelOn: {
@@ -1926,7 +1930,7 @@ const styles = StyleSheet.create({
   waterCupsMeta: {
     fontSize: 12,
     color: '#9CA3AF',
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
   },
   suppRowCompact: {
     paddingVertical: 6,
@@ -1945,6 +1949,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     fontSize: 13,
+    fontFamily: FONT_BODY,
     color: '#FAFAFA',
     backgroundColor: '#252525',
   },
@@ -1963,18 +1968,19 @@ const styles = StyleSheet.create({
   },
   summaryTitle: {
     fontSize: 22,
-    fontWeight: '700',
+    fontFamily: FONT_EXTRA,
     color: '#1A1A1A',
   },
   summaryDate: {
     marginTop: 2,
     fontSize: 12,
+    fontFamily: FONT_BODY,
     color: '#4B5563',
   },
   summaryMeta: {
     marginTop: 12,
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
     color: '#8A3A20',
   },
   summaryProgressTrack: {
@@ -1997,7 +2003,7 @@ const styles = StyleSheet.create({
   summaryMealLine: {
     color: '#111827',
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
   },
   summaryThumb: {
     marginTop: 6,
@@ -2009,10 +2015,12 @@ const styles = StyleSheet.create({
     marginTop: 5,
     color: '#374151',
     fontSize: 12,
+    fontFamily: FONT_BODY,
   },
   summaryFooter: {
     marginTop: 14,
     color: '#4B5563',
     fontSize: 12,
+    fontFamily: FONT_BODY,
   },
 });

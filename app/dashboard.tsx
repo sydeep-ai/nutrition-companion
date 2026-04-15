@@ -15,6 +15,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { FONT_BODY, FONT_SEMIBOLD, FONT_BOLD, FONT_EXTRA } from '../constants/fonts';
 import {
   DEFAULT_MEAL_PLAN,
   parseMealPlanFromStorage,
@@ -59,6 +60,7 @@ const TRACKING_GRID_ITEMS: { id: TrackingId; emoji: string; label: string }[] = 
 const CUSTOM_ITEM_EMOJI_CYCLE = ['⭐', '🧘', '🚴', '📚', '🎯', '🌿'] as const;
 
 type SupplementRow = { name: string; timing: string };
+
 type CustomItemRow = { label: string; emoji: string };
 
 function isTrackingId(s: string): s is TrackingId {
@@ -214,9 +216,6 @@ export default function DashboardScreen({
   const [editStepsGoal, setEditStepsGoal] = useState('10000');
   const [editWorkoutLabel, setEditWorkoutLabel] = useState('');
   const [editWaterGoal, setEditWaterGoal] = useState('8');
-  const [editSupplements, setEditSupplements] = useState<SupplementRow[]>([
-    { name: '', timing: '' },
-  ]);
   const [editCustomItems, setEditCustomItems] = useState<CustomItemRow[]>([
     { label: '', emoji: '⭐' },
   ]);
@@ -544,7 +543,6 @@ export default function DashboardScreen({
       stepsRaw,
       workoutRaw,
       waterRaw,
-      supRaw,
       customRaw,
     ] = await Promise.all([
       AsyncStorage.getItem('target_days'),
@@ -554,7 +552,6 @@ export default function DashboardScreen({
       AsyncStorage.getItem(STEPS_GOAL_KEY),
       AsyncStorage.getItem(WORKOUT_LABEL_KEY),
       AsyncStorage.getItem(WATER_GOAL_KEY),
-      AsyncStorage.getItem(SUPPLEMENT_LIST_KEY),
       AsyncStorage.getItem(CUSTOM_ITEMS_KEY),
     ]);
 
@@ -580,19 +577,6 @@ export default function DashboardScreen({
         ? String(Math.floor(waterN))
         : '8'
     );
-    try {
-      const sup = supRaw ? (JSON.parse(supRaw) as SupplementRow[]) : [];
-      setEditSupplements(
-        Array.isArray(sup) && sup.length > 0
-          ? sup.map((r) => ({
-              name: String(r?.name ?? ''),
-              timing: String(r?.timing ?? ''),
-            }))
-          : [{ name: '', timing: '' }]
-      );
-    } catch {
-      setEditSupplements([{ name: '', timing: '' }]);
-    }
     try {
       const ci = customRaw ? (JSON.parse(customRaw) as CustomItemRow[]) : [];
       setEditCustomItems(
@@ -801,7 +785,7 @@ export default function DashboardScreen({
       pairs.push([WATER_GOAL_KEY, String(Math.floor(Number(editWaterGoal)))]);
     }
     if (ordered.includes('supplements')) {
-      pairs.push([SUPPLEMENT_LIST_KEY, JSON.stringify(editSupplements)]);
+      pairs.push([SUPPLEMENT_LIST_KEY, JSON.stringify([])]);
     }
     if (ordered.includes('custom')) {
       const items = editCustomItems
@@ -1219,7 +1203,9 @@ export default function DashboardScreen({
                 })}
               </View>
 
-              {TRACKING_ORDER.filter((id) => editTrackingSelected.includes(id)).map((tid) => {
+              {TRACKING_ORDER.filter(
+                (id) => editTrackingSelected.includes(id) && id !== 'supplements'
+              ).map((tid) => {
                 if (tid === 'meals') {
                   return (
                     <View key="cfg-meals" style={styles.planEditorSection}>
@@ -1321,57 +1307,6 @@ export default function DashboardScreen({
                         placeholder="8"
                         placeholderTextColor="#9CA3AF"
                       />
-                    </View>
-                  );
-                }
-                if (tid === 'supplements') {
-                  return (
-                    <View key="cfg-supplements" style={styles.planEditorSection}>
-                      <Text style={styles.planEditorSectionTitle}>💊 Supplements</Text>
-                      {editSupplements.map((row, idx) => (
-                        <View key={`sup-row-${idx}`} style={styles.planSubRowCard}>
-                          <TextInput
-                            value={row.name}
-                            onChangeText={(v) =>
-                              setEditSupplements((prev) =>
-                                prev.map((r, i) => (i === idx ? { ...r, name: v } : r))
-                              )
-                            }
-                            style={styles.planEditorInput}
-                            placeholder="Name"
-                            placeholderTextColor="#9CA3AF"
-                          />
-                          <TextInput
-                            value={row.timing}
-                            onChangeText={(v) =>
-                              setEditSupplements((prev) =>
-                                prev.map((r, i) => (i === idx ? { ...r, timing: v } : r))
-                              )
-                            }
-                            style={styles.planEditorInput}
-                            placeholder="Timing"
-                            placeholderTextColor="#9CA3AF"
-                          />
-                          {editSupplements.length > 1 ? (
-                            <Pressable
-                              style={styles.planRemoveLink}
-                              onPress={() =>
-                                setEditSupplements((prev) => prev.filter((_, i) => i !== idx))
-                              }
-                            >
-                              <Text style={styles.planRemoveLinkText}>Remove</Text>
-                            </Pressable>
-                          ) : null}
-                        </View>
-                      ))}
-                      <Pressable
-                        style={styles.planAddRowButton}
-                        onPress={() =>
-                          setEditSupplements((prev) => [...prev, { name: '', timing: '' }])
-                        }
-                      >
-                        <Text style={styles.planAddRowButtonText}>+ Add supplement</Text>
-                      </Pressable>
                     </View>
                   );
                 }
@@ -1562,7 +1497,7 @@ const styles = StyleSheet.create({
   },
   greeting: {
     fontSize: 28,
-    fontWeight: '700',
+    fontFamily: FONT_EXTRA,
     color: TEXT_PRIMARY,
     marginBottom: 4,
   },
@@ -1571,12 +1506,12 @@ const styles = StyleSheet.create({
   },
   goalLabel: {
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     color: ACCENT,
   },
   goalHeadline: {
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     color: TEXT_PRIMARY,
   },
   goalRow: {
@@ -1594,7 +1529,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     color: TEXT_PRIMARY,
-    fontWeight: '600',
+    fontFamily: FONT_BODY,
     fontSize: 16,
   },
   editButton: {
@@ -1611,7 +1546,7 @@ const styles = StyleSheet.create({
   editButtonText: {
     color: TEXT_SECONDARY,
     fontSize: 12,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
   },
   editIcon: {
     fontSize: 14,
@@ -1668,6 +1603,7 @@ const styles = StyleSheet.create({
     color: TEXT_SECONDARY,
     textAlign: 'center',
     fontSize: 14,
+    fontFamily: FONT_BODY,
   },
   dotsRow: {
     flexDirection: 'row',
@@ -1706,11 +1642,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: TEXT_PRIMARY,
     lineHeight: 20,
+    fontFamily: FONT_BODY,
   },
   dayCounter: {
     fontSize: 21,
     color: TEXT_PRIMARY,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     marginBottom: 0,
   },
   dayCounterRow: {
@@ -1721,7 +1658,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     color: TEXT_PRIMARY,
     marginBottom: 6,
   },
@@ -1738,13 +1675,13 @@ const styles = StyleSheet.create({
   rewardTitle: {
     color: ACCENT,
     fontSize: 21,
-    fontWeight: '700',
+    fontFamily: FONT_EXTRA,
     marginBottom: 6,
   },
   rewardNameText: {
     color: '#FAFAFA',
     fontSize: 19,
-    fontWeight: '700',
+    fontFamily: FONT_SEMIBOLD,
     marginBottom: 10,
   },
   rewardNamePlaceholder: {
@@ -1752,6 +1689,7 @@ const styles = StyleSheet.create({
     color: '#888',
     fontStyle: 'italic',
     marginBottom: 10,
+    fontFamily: FONT_BODY,
   },
   rewardProgressWrap: {
     position: 'relative',
@@ -1795,7 +1733,7 @@ const styles = StyleSheet.create({
   rewardMeta: {
     color: TEXT_SECONDARY,
     fontSize: 14,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
   },
   statCard: {
     flex: 1,
@@ -1814,17 +1752,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: TEXT_SECONDARY,
     marginBottom: 4,
+    fontFamily: FONT_BODY,
   },
   statValue: {
     fontSize: 11,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     color: TEXT_PRIMARY,
     textAlign: 'center',
   },
   startButtonText: {
     color: TEXT_PRIMARY,
     fontSize: 18,
-    fontWeight: '800',
+    fontFamily: FONT_EXTRA,
   },
   visionBoardModalRoot: {
     flex: 1,
@@ -1836,7 +1775,7 @@ const styles = StyleSheet.create({
   visionBoardModalTitle: {
     color: TEXT_PRIMARY,
     fontSize: 22,
-    fontWeight: '700',
+    fontFamily: FONT_EXTRA,
     marginBottom: 20,
     textAlign: 'center',
   },
@@ -1874,7 +1813,7 @@ const styles = StyleSheet.create({
   visionBoardPlus: {
     fontSize: 32,
     color: '#9CA3AF',
-    fontWeight: '300',
+    fontFamily: FONT_BODY,
     lineHeight: 34,
   },
   visionBoardDeleteBtn: {
@@ -1902,7 +1841,7 @@ const styles = StyleSheet.create({
   visionBoardDoneButtonText: {
     color: TEXT_PRIMARY,
     fontSize: 17,
-    fontWeight: '800',
+    fontFamily: FONT_EXTRA,
   },
   rewardPickButton: {
     borderRadius: 10,
@@ -1916,7 +1855,7 @@ const styles = StyleSheet.create({
   },
   rewardPickButtonText: {
     color: TEXT_SECONDARY,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
   },
   modalOverlay: {
     flex: 1,
@@ -1934,13 +1873,13 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     color: TEXT_PRIMARY,
     marginBottom: 10,
   },
   modalLabel: {
     color: TEXT_SECONDARY,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
     fontSize: 13,
     marginBottom: 6,
     marginTop: 4,
@@ -1954,10 +1893,12 @@ const styles = StyleSheet.create({
     color: TEXT_PRIMARY,
     marginBottom: 10,
     backgroundColor: SURFACE,
+    fontFamily: FONT_BODY,
+    fontSize: 16,
   },
   modalSectionTitle: {
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     color: TEXT_PRIMARY,
     marginTop: 6,
     marginBottom: 8,
@@ -1965,6 +1906,8 @@ const styles = StyleSheet.create({
   modalTextarea: {
     minHeight: 64,
     textAlignVertical: 'top',
+    fontFamily: FONT_BODY,
+    fontSize: 16,
   },
   modalActions: {
     flexDirection: 'row',
@@ -1984,7 +1927,7 @@ const styles = StyleSheet.create({
   },
   cancelButtonText: {
     color: TEXT_SECONDARY,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
   },
   saveButton: {
     flex: 1,
@@ -1996,7 +1939,7 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     color: TEXT_PRIMARY,
-    fontWeight: '800',
+    fontFamily: FONT_EXTRA,
   },
   planEditorModalCard: {
     backgroundColor: BG,
@@ -2007,7 +1950,7 @@ const styles = StyleSheet.create({
   },
   planEditorTitle: {
     fontSize: 22,
-    fontWeight: '800',
+    fontFamily: FONT_EXTRA,
     color: TEXT_PRIMARY,
     marginBottom: 12,
   },
@@ -2024,13 +1967,13 @@ const styles = StyleSheet.create({
   },
   planEditorSectionHeading: {
     fontSize: 17,
-    fontWeight: '800',
+    fontFamily: FONT_EXTRA,
     color: ACCENT,
     marginBottom: 4,
   },
   planEditorSectionTitle: {
     fontSize: 16,
-    fontWeight: '800',
+    fontFamily: FONT_EXTRA,
     color: TEXT_PRIMARY,
     marginBottom: 10,
   },
@@ -2038,11 +1981,11 @@ const styles = StyleSheet.create({
     color: TEXT_SECONDARY,
     fontSize: 13,
     marginBottom: 10,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
   },
   planEditorLabel: {
     color: TEXT_SECONDARY,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
     fontSize: 13,
     marginBottom: 6,
   },
@@ -2055,10 +1998,14 @@ const styles = StyleSheet.create({
     color: TEXT_PRIMARY,
     marginBottom: 10,
     backgroundColor: '#252525',
+    fontFamily: FONT_BODY,
+    fontSize: 16,
   },
   planEditorTextarea: {
     minHeight: 72,
     textAlignVertical: 'top',
+    fontFamily: FONT_BODY,
+    fontSize: 16,
   },
   planTrackingGrid: {
     flexDirection: 'row',
@@ -2092,7 +2039,7 @@ const styles = StyleSheet.create({
   planTrackingLabel: {
     color: TEXT_PRIMARY,
     fontSize: 12,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     textAlign: 'center',
   },
   planMealEditCard: {
@@ -2125,7 +2072,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     color: TEXT_PRIMARY,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
   },
   planMealTypeDropdownChevron: {
     fontSize: 12,
@@ -2152,7 +2099,7 @@ const styles = StyleSheet.create({
   },
   planMealTypeModalTitle: {
     fontSize: 18,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     color: TEXT_PRIMARY,
     marginBottom: 12,
   },
@@ -2167,7 +2114,7 @@ const styles = StyleSheet.create({
   planMealTypeModalOptionText: {
     fontSize: 16,
     color: TEXT_PRIMARY,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
   },
   planMealTypeCustomWrap: {
     gap: 12,
@@ -2176,6 +2123,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#D1D5DB',
     marginBottom: 4,
+    fontFamily: FONT_BODY,
   },
   planMealTypeCustomActions: {
     flexDirection: 'row',
@@ -2192,7 +2140,7 @@ const styles = StyleSheet.create({
   },
   planMealTypeModalSecondaryBtnText: {
     color: '#D1D5DB',
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
   },
   planMealTypeModalPrimaryBtn: {
     flex: 1,
@@ -2203,7 +2151,7 @@ const styles = StyleSheet.create({
   },
   planMealTypeModalPrimaryBtnText: {
     color: '#FFFFFF',
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
   },
   planMealTypeModalCancel: {
     marginTop: 14,
@@ -2213,7 +2161,7 @@ const styles = StyleSheet.create({
   planMealTypeModalCancelText: {
     color: '#9CA3AF',
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: FONT_BODY,
   },
   planEmojiPill: {
     borderRadius: 999,
@@ -2243,7 +2191,7 @@ const styles = StyleSheet.create({
   planRemoveMealBtnText: {
     color: '#F87171',
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
   },
   planAddRowButton: {
     borderRadius: 10,
@@ -2255,7 +2203,7 @@ const styles = StyleSheet.create({
   },
   planAddRowButtonText: {
     color: ACCENT,
-    fontWeight: '800',
+    fontFamily: FONT_EXTRA,
     fontSize: 14,
   },
   planSubRowCard: {
@@ -2270,7 +2218,7 @@ const styles = StyleSheet.create({
   },
   planRemoveLinkText: {
     color: '#F87171',
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     fontSize: 14,
   },
   planCustomRow: {
@@ -2298,7 +2246,7 @@ const styles = StyleSheet.create({
   },
   planEditorCancelText: {
     color: TEXT_SECONDARY,
-    fontWeight: '800',
+    fontFamily: FONT_EXTRA,
     fontSize: 16,
   },
   planEditorSaveButton: {
@@ -2311,7 +2259,7 @@ const styles = StyleSheet.create({
   },
   planEditorSaveText: {
     color: TEXT_PRIMARY,
-    fontWeight: '800',
+    fontFamily: FONT_EXTRA,
     fontSize: 16,
   },
 });

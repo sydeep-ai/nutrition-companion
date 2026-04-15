@@ -11,6 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { FONT_BODY, FONT_SEMIBOLD, FONT_BOLD, FONT_EXTRA } from '../constants/fonts';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const ACCENT = '#D85A30';
@@ -39,9 +40,11 @@ const RESET_STATIC_KEYS: string[] = [
   STEPS_GOAL_KEY,
   'water_goal',
   WORKOUT_LABEL_KEY,
-  'supplement_list',
   CUSTOM_ITEMS_KEY,
   'last_quote_date',
+  'milestone_shown_7',
+  'milestone_shown_14',
+  'milestone_shown_30',
 ];
 
 function storageKeyMatchesDailyDataPattern(key: string): boolean {
@@ -323,7 +326,7 @@ const styles = StyleSheet.create({
   },
   screenTitle: {
     fontSize: 28,
-    fontWeight: '700',
+    fontFamily: FONT_EXTRA,
     color: TEXT,
     marginBottom: 8,
     marginTop: 8,
@@ -331,7 +334,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: ACCENT,
     fontSize: 13,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     marginBottom: 8,
     marginTop: 16,
   },
@@ -349,7 +352,7 @@ const styles = StyleSheet.create({
   rowLabel: {
     color: TEXT,
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
     flex: 1,
   },
   rowDanger: {
@@ -358,7 +361,7 @@ const styles = StyleSheet.create({
   chevron: {
     color: TEXT,
     fontSize: 22,
-    fontWeight: '300',
+    fontFamily: FONT_BODY,
     marginLeft: 8,
   },
   inlineBlock: {
@@ -374,6 +377,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     color: TEXT,
     fontSize: 16,
+    fontFamily: FONT_BODY,
     marginBottom: 8,
   },
   inputTall: {
@@ -384,6 +388,7 @@ const styles = StyleSheet.create({
     color: GREY,
     fontSize: 12,
     marginBottom: 6,
+    fontFamily: FONT_BODY,
   },
   saveChip: {
     alignSelf: 'flex-start',
@@ -394,7 +399,7 @@ const styles = StyleSheet.create({
   },
   saveChipText: {
     color: '#FFFFFF',
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     fontSize: 14,
   },
   version: {
@@ -402,5 +407,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 12,
     marginBottom: 8,
+    fontFamily: FONT_BODY,
   },
 });

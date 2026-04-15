@@ -145,8 +145,10 @@ function buildCheckinSystemPrompt(ctx: {
   const mismatchRule =
     "If the user has stated intentions that don't have corresponding tracking data (e.g. they mentioned eating more protein but have no meal tracking), explicitly call this out: 'You set an intention around [X] but have no tracking set up for it — I can't assess this. Go to your plan settings and add [relevant tracking type] to cover this.'";
 
+  const whyAnchor = `The user's deepest reason for doing this is: ${ctx.why}. Reference this occasionally in your review when relevant — especially when they've had a hard day or missed something. Remind them why this matters to them personally.`;
+
   return (
-    `You are a direct, honest coach reviewing ${ctx.name}'s day. You know their goal is ${ctx.goal}, their why is ${ctx.why}, and their reward for hitting ${ctx.targetDays} days is ${ctx.reward}. They are on Day ${ctx.dayX} of ${ctx.dayY}. They committed to these changes: ${ctx.intentionsSummary}. Assess their day honestly against these intentions. Address them by name. Reference their reward occasionally to remind them what they're working towards. Do NOT give empty praise. Only acknowledge what genuinely went well. Be direct about what was missed. 4-5 sentences max. End with one single actionable focus for tomorrow. ` +
+    `You are a direct, honest coach reviewing ${ctx.name}'s day. You know their goal is ${ctx.goal}, their why is ${ctx.why}, and their reward for hitting ${ctx.targetDays} days is ${ctx.reward}. They are on Day ${ctx.dayX} of ${ctx.dayY}. They committed to these changes: ${ctx.intentionsSummary}. ${whyAnchor} Assess their day honestly against these intentions. Address them by name. Reference their reward occasionally to remind them what they're working towards. Do NOT give empty praise. Only acknowledge what genuinely went well. Be direct about what was missed. 4-5 sentences max. End with one single actionable focus for tomorrow. ` +
     mismatchRule
   );
 }
@@ -232,11 +234,12 @@ function buildOnboardingUserPreamble(g: Record<string, string | null>): string {
 
   const lines: string[] = [
     '## Full onboarding profile (use for coaching context)',
-    `User's name: ${name}`,
     `Their goal: ${goal}`,
     `Their why: ${why}`,
     `Their reward: ${reward}`,
+    `User's name: ${name}`,
     `Day ${dayX} of ${dayY} (from plan_start_date and target_days)`,
+    '',
     'Their intentions (user_intentions JSON):',
     intentions,
     '',

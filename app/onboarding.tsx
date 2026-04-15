@@ -16,6 +16,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { FONT_BODY, FONT_SEMIBOLD, FONT_BOLD, FONT_EXTRA } from '../constants/fonts';
 import { PlanMeal } from '../data/defaultMealPlan';
 
 const ACCENT = '#D85A30';
@@ -72,7 +73,6 @@ const TRACKING_TYPES: {
 
 const CUSTOM_EMOJI_CYCLE = ['⭐', '🧘', '🚴', '📚', '🎯', '🌿'] as const;
 
-type SupplementRow = { name: string; timing: string };
 type CustomItemRow = { label: string; emoji: string };
 
 type Props = {
@@ -80,8 +80,9 @@ type Props = {
 };
 
 const goalChips = [
-  'Holiday in Bali',
-  'Fit into my size 10 jeans',
+  'Upcoming Holiday Hotness',
+  'Drop a size',
+  'Bulk up',
   'See my abs',
   'Feel strong and confident',
   'Look amazing at a special event',
@@ -96,6 +97,53 @@ const INTENTION_CHIPS = [
   'Meal prep Sundays',
 ] as const;
 const MAX_INTENTIONS = 5;
+
+const MEAL_KEYWORDS = [
+  'eat',
+  'food',
+  'protein',
+  'meal',
+  'diet',
+  'nutrition',
+  'calories',
+  'breakfast',
+  'lunch',
+  'dinner',
+] as const;
+const STEPS_KEYWORDS = ['move', 'steps', 'walk', 'active', '10000', '10k'] as const;
+const WORKOUT_KEYWORDS = [
+  'gym',
+  'workout',
+  'train',
+  'exercise',
+  'lift',
+  'run',
+  'yoga',
+] as const;
+const WATER_KEYWORDS = ['water', 'hydration', 'drink', '2l', '2 litre', 'liters', 'litres'] as const;
+const SUPP_KEYWORDS = ['supplement', 'vitamin', 'iron', 'b12'] as const;
+
+/** Suggested tracking ids (meals/steps/workout/water/supplements only), TRACKING_ORDER order, deduped. */
+function inferTrackingFromIntentionText(blob: string): TrackingId[] {
+  const t = blob.toLowerCase();
+  const found = new Set<TrackingId>();
+  for (const w of MEAL_KEYWORDS) {
+    if (t.includes(w)) found.add('meals');
+  }
+  for (const w of STEPS_KEYWORDS) {
+    if (t.includes(w)) found.add('steps');
+  }
+  for (const w of WORKOUT_KEYWORDS) {
+    if (t.includes(w)) found.add('workout');
+  }
+  for (const w of WATER_KEYWORDS) {
+    if (t.includes(w)) found.add('water');
+  }
+  for (const w of SUPP_KEYWORDS) {
+    if (t.includes(w)) found.add('supplements');
+  }
+  return TRACKING_ORDER.filter((id) => found.has(id));
+}
 
 export default function OnboardingScreen({ onComplete }: Props) {
   const [step, setStep] = useState(0);
@@ -116,13 +164,9 @@ export default function OnboardingScreen({ onComplete }: Props) {
   const [selectedTrackingIds, setSelectedTrackingIds] = useState<Set<TrackingId>>(() => new Set());
   const [trackingSelectionError, setTrackingSelectionError] = useState(false);
   const [trackingOrder, setTrackingOrder] = useState<TrackingId[]>([]);
-  const [configStepTotal, setConfigStepTotal] = useState(0);
   const [stepsGoalStr, setStepsGoalStr] = useState('10000');
   const [workoutLabel, setWorkoutLabel] = useState('');
   const [waterGoalStr, setWaterGoalStr] = useState('8');
-  const [supplementRows, setSupplementRows] = useState<SupplementRow[]>([
-    { name: '', timing: '' },
-  ]);
   const [customItemRows, setCustomItemRows] = useState<CustomItemRow[]>([
     { label: '', emoji: '⭐' },
   ]);
@@ -131,6 +175,11 @@ export default function OnboardingScreen({ onComplete }: Props) {
   const [mealTypeModalIndex, setMealTypeModalIndex] = useState<number | null>(null);
   const [mealTypeModalCustom, setMealTypeModalCustom] = useState(false);
   const [mealTypeCustomDraft, setMealTypeCustomDraft] = useState('');
+
+  const configFlowOrder = useMemo(
+    () => TRACKING_ORDER.filter((id) => trackingOrder.includes(id) && id !== 'supplements'),
+    [trackingOrder]
+  );
 
   const closeMealTypeModal = () => {
     setMealTypeModalIndex(null);
@@ -329,7 +378,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
     });
   };
 
-  const continueFromTracking = () => {
+  const continueFromBuildPlan = () => {
     const ordered = TRACKING_ORDER.filter((id) => selectedTrackingIds.has(id));
     if (ordered.length === 0) {
       setTrackingSelectionError(true);
@@ -337,8 +386,8 @@ export default function OnboardingScreen({ onComplete }: Props) {
     }
     void AsyncStorage.setItem('tracking_config', JSON.stringify(ordered));
     setTrackingOrder(ordered);
-    setConfigStepTotal(ordered.length);
-    setStep(9);
+    setTrackingSelectionError(false);
+    setStep(7);
   };
 
   const finishOnboarding = async () => {
@@ -396,7 +445,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
       }
 
       if (trackingOrder.includes('supplements')) {
-        pairs.push(['supplement_list', JSON.stringify(supplementRows)]);
+        pairs.push(['supplement_list', JSON.stringify([])]);
       }
 
       if (trackingOrder.includes('custom')) {
@@ -415,7 +464,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
 
   const advanceAfterConfig = (isLast: boolean) => {
     if (isLast) {
-      void finishOnboarding();
+      setStep(8 + configFlowOrder.length);
     } else {
       setStep((s) => s + 1);
     }
@@ -515,16 +564,79 @@ export default function OnboardingScreen({ onComplete }: Props) {
       );
     }
 
+    if (step === 3) {
+      return (
+        <View style={styles.stepBody}>
+          <Text style={styles.heading}>Why does this matter to you?</Text>
+          <TextInput
+            value={userWhy}
+            onChangeText={setUserWhy}
+            placeholder="Write your why..."
+            placeholderTextColor="#9CA3AF"
+            style={[styles.input, styles.tallInput]}
+            multiline
+          />
+          <Pressable style={styles.primaryButton} onPress={goNext}>
+            <Text style={styles.primaryButtonText}>Continue</Text>
+          </Pressable>
+          <Pressable onPress={goNext}>
+            <Text style={styles.skipText}>Add Later</Text>
+          </Pressable>
+        </View>
+      );
+    }
+
+    if (step === 4) {
+      return (
+        <View style={styles.stepBody}>
+          <Text style={styles.heading}>Add photos that represent your goal</Text>
+          <Text style={styles.visionBoardDescription}>
+            This is your vision board — photos that represent what you&apos;re working towards. You
+            can add or update these anytime from your dashboard.
+          </Text>
+          <View style={styles.visionGrid}>
+            {Array.from({ length: VISION_SLOTS }).map((_, index) => {
+              const uri = visionPhotos[index];
+              return (
+                <Pressable
+                  key={`vision-${index}`}
+                  style={styles.visionSlot}
+                  onPress={() => void pickVisionPhoto(index)}
+                >
+                  {uri ? (
+                    <Image source={{ uri }} style={styles.visionImage} />
+                  ) : (
+                    <Text style={styles.visionPlus}>+</Text>
+                  )}
+                </Pressable>
+              );
+            })}
+          </View>
+          <Pressable style={styles.primaryButton} onPress={goNext}>
+            <Text style={styles.primaryButtonText}>Continue</Text>
+          </Pressable>
+          <Pressable onPress={goNext}>
+            <Text style={styles.skipText}>Add Later</Text>
+          </Pressable>
+        </View>
+      );
+    }
+
     if (step === 5) {
       const saveIntentionsAndContinue = async () => {
         const arr = intentionRows.map((s) => s.trim()).filter(Boolean);
         await AsyncStorage.setItem('user_intentions', JSON.stringify(arr));
-        goNext();
+        const inferred = inferTrackingFromIntentionText(arr.join(' '));
+        setSelectedTrackingIds(new Set(inferred));
+        setTrackingSelectionError(false);
+        setStep(6);
       };
 
       const skipIntentions = async () => {
         await AsyncStorage.setItem('user_intentions', JSON.stringify([]));
-        goNext();
+        setSelectedTrackingIds(new Set());
+        setTrackingSelectionError(false);
+        setStep(6);
       };
 
       const fillNextEmptyIntention = (text: string) => {
@@ -591,67 +703,9 @@ export default function OnboardingScreen({ onComplete }: Props) {
             ))}
           </View>
           <Pressable style={styles.intentionsContinueButton} onPress={() => void saveIntentionsAndContinue()}>
-            <Text style={styles.primaryButtonText}>Continue</Text>
+            <Text style={styles.primaryButtonText}>Let&apos;s make a plan!</Text>
           </Pressable>
           <Pressable onPress={() => void skipIntentions()}>
-            <Text style={styles.skipText}>Add Later</Text>
-          </Pressable>
-        </View>
-      );
-    }
-
-    if (step === 3) {
-      return (
-        <View style={styles.stepBody}>
-          <Text style={styles.heading}>Why does this matter to you?</Text>
-          <TextInput
-            value={userWhy}
-            onChangeText={setUserWhy}
-            placeholder="Write your why..."
-            placeholderTextColor="#9CA3AF"
-            style={[styles.input, styles.tallInput]}
-            multiline
-          />
-          <Pressable style={styles.primaryButton} onPress={goNext}>
-            <Text style={styles.primaryButtonText}>Continue</Text>
-          </Pressable>
-          <Pressable onPress={goNext}>
-            <Text style={styles.skipText}>Add Later</Text>
-          </Pressable>
-        </View>
-      );
-    }
-
-    if (step === 4) {
-      return (
-        <View style={styles.stepBody}>
-          <Text style={styles.heading}>Add photos that represent your goal</Text>
-          <Text style={styles.visionBoardDescription}>
-            This is your vision board — photos that represent what you&apos;re working towards. You
-            can add or update these anytime from your dashboard.
-          </Text>
-          <View style={styles.visionGrid}>
-            {Array.from({ length: VISION_SLOTS }).map((_, index) => {
-              const uri = visionPhotos[index];
-              return (
-                <Pressable
-                  key={`vision-${index}`}
-                  style={styles.visionSlot}
-                  onPress={() => void pickVisionPhoto(index)}
-                >
-                  {uri ? (
-                    <Image source={{ uri }} style={styles.visionImage} />
-                  ) : (
-                    <Text style={styles.visionPlus}>+</Text>
-                  )}
-                </Pressable>
-              );
-            })}
-          </View>
-          <Pressable style={styles.primaryButton} onPress={goNext}>
-            <Text style={styles.primaryButtonText}>Continue</Text>
-          </Pressable>
-          <Pressable onPress={goNext}>
             <Text style={styles.skipText}>Add Later</Text>
           </Pressable>
         </View>
@@ -661,36 +715,34 @@ export default function OnboardingScreen({ onComplete }: Props) {
     if (step === 6) {
       return (
         <View style={styles.stepBody}>
-          <Text style={styles.heading}>What will you reward yourself with?</Text>
+          <Text style={styles.heading}>Build your plan</Text>
           <Text style={styles.subtext}>
-            Make it something you really want. A trip, an item, an experience — something that
-            makes showing up worth it.
+            Here&apos;s what we suggest based on your intentions. Add anything else you want to
+            track:
           </Text>
-
-          <TextInput
-            value={rewardName}
-            onChangeText={setRewardName}
-            placeholder='Reward name (e.g. "Dyson Airwrap")'
-            placeholderTextColor="#9CA3AF"
-            style={styles.input}
-          />
-
-          <Pressable style={styles.rewardCard} onPress={() => void pickRewardPhoto()}>
-            {rewardPhoto ? (
-              <Image source={{ uri: rewardPhoto }} style={styles.rewardImage} />
-            ) : (
-              <View style={styles.rewardPlaceholder}>
-                <Text style={styles.rewardEmoji}>🎁</Text>
-                <Text style={styles.rewardPlaceholderText}>Tap to add a reward photo</Text>
-              </View>
-            )}
-          </Pressable>
-
-          <Pressable style={styles.primaryButton} onPress={goNext}>
-            <Text style={styles.primaryButtonText}>Continue</Text>
-          </Pressable>
-          <Pressable onPress={goNext}>
-            <Text style={styles.skipText}>Add Later</Text>
+          {trackingSelectionError ? (
+            <Text style={styles.trackingWarning}>
+              Please select at least one area to track before continuing.
+            </Text>
+          ) : null}
+          <View style={styles.trackingGrid}>
+            {TRACKING_TYPES.map((t) => {
+              const selected = selectedTrackingIds.has(t.id);
+              return (
+                <Pressable
+                  key={t.id}
+                  style={[styles.trackingCard, selected && styles.trackingCardSelected]}
+                  onPress={() => toggleTrackingId(t.id)}
+                >
+                  <Text style={styles.trackingCardEmoji}>{t.emoji}</Text>
+                  <Text style={styles.trackingCardTitle}>{t.title}</Text>
+                  <Text style={styles.trackingCardSubtitle}>{t.subtitle}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Pressable style={styles.primaryButton} onPress={continueFromBuildPlan}>
+            <Text style={styles.primaryButtonText}>Let&apos;s go!</Text>
           </Pressable>
         </View>
       );
@@ -737,7 +789,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
                 );
                 return;
               }
-              goNext();
+              setStep(8);
             }}
           >
             <Text style={styles.primaryButtonText}>Continue</Text>
@@ -746,43 +798,52 @@ export default function OnboardingScreen({ onComplete }: Props) {
       );
     }
 
-    if (step === 8) {
+    if (step === 8 + configFlowOrder.length && trackingOrder.length > 0) {
+      const rewardIntro =
+        resolvedTargetDays != null && resolvedTargetDays > 0
+          ? `You've committed to ${resolvedTargetDays} days of showing up for yourself. When you get there, you're going to celebrate. What's the one thing that would make hitting this goal feel truly worth it?`
+          : `You've committed to your goal. When you get there, you're going to celebrate. What's the one thing that would make hitting this goal feel truly worth it?`;
+
       return (
         <View style={styles.stepBody}>
-          <Text style={styles.heading}>What do you want to track each day?</Text>
-          <Text style={styles.subtext}>Select everything you want to stay on top of</Text>
-          {trackingSelectionError ? (
-            <Text style={styles.trackingWarning}>
-              Please select at least one area to track before continuing.
+          <Text style={styles.heading}>What will you reward yourself with?</Text>
+          <Text style={styles.rewardSubtext}>{rewardIntro}</Text>
+
+          <TextInput
+            value={rewardName}
+            onChangeText={setRewardName}
+            placeholder='Reward name (e.g. "Dyson Airwrap")'
+            placeholderTextColor="#9CA3AF"
+            style={styles.input}
+          />
+
+          <Pressable style={styles.rewardCard} onPress={() => void pickRewardPhoto()}>
+            {rewardPhoto ? (
+              <Image source={{ uri: rewardPhoto }} style={styles.rewardImage} />
+            ) : (
+              <View style={styles.rewardPlaceholder}>
+                <Text style={styles.rewardEmoji}>🎁</Text>
+                <Text style={styles.rewardPlaceholderText}>Tap to add a reward photo</Text>
+              </View>
+            )}
+          </Pressable>
+
+          <Pressable style={styles.primaryButton} onPress={() => void finishOnboarding()}>
+            <Text style={styles.primaryButtonText}>
+              {saving ? 'Saving...' : 'Lock it in 🔒'}
             </Text>
-          ) : null}
-          <View style={styles.trackingGrid}>
-            {TRACKING_TYPES.map((t) => {
-              const selected = selectedTrackingIds.has(t.id);
-              return (
-                <Pressable
-                  key={t.id}
-                  style={[styles.trackingCard, selected && styles.trackingCardSelected]}
-                  onPress={() => toggleTrackingId(t.id)}
-                >
-                  <Text style={styles.trackingCardEmoji}>{t.emoji}</Text>
-                  <Text style={styles.trackingCardTitle}>{t.title}</Text>
-                  <Text style={styles.trackingCardSubtitle}>{t.subtitle}</Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <Pressable style={styles.primaryButton} onPress={continueFromTracking}>
-            <Text style={styles.primaryButtonText}>Continue</Text>
+          </Pressable>
+          <Pressable onPress={() => void finishOnboarding()} disabled={saving}>
+            <Text style={styles.skipText}>Add Later</Text>
           </Pressable>
         </View>
       );
     }
 
-    if (step >= 9) {
-      const configIndex = step - 9;
-      const kind = trackingOrder[configIndex];
-      const isLast = configIndex === trackingOrder.length - 1;
+    if (step >= 8 && step < 8 + configFlowOrder.length) {
+      const configIndex = step - 8;
+      const kind = configFlowOrder[configIndex];
+      const isLast = configIndex === configFlowOrder.length - 1;
       if (!kind) {
         return null;
       }
@@ -811,7 +872,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
               }}
             >
               <Text style={styles.primaryButtonText}>
-                {saving && isLast ? 'Saving...' : isLast ? "Let's go" : 'Continue'}
+                {saving ? 'Saving...' : 'Continue'}
               </Text>
             </Pressable>
           </View>
@@ -831,9 +892,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
               style={styles.input}
             />
             <Pressable style={styles.primaryButton} onPress={() => advanceAfterConfig(isLast)}>
-              <Text style={styles.primaryButtonText}>
-                {saving && isLast ? 'Saving...' : isLast ? "Let's go" : 'Continue'}
-              </Text>
+              <Text style={styles.primaryButtonText}>{saving ? 'Saving...' : 'Continue'}</Text>
             </Pressable>
           </View>
         );
@@ -862,67 +921,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
                 advanceAfterConfig(isLast);
               }}
             >
-              <Text style={styles.primaryButtonText}>
-                {saving && isLast ? 'Saving...' : isLast ? "Let's go" : 'Continue'}
-              </Text>
-            </Pressable>
-          </View>
-        );
-      }
-
-      if (kind === 'supplements') {
-        return (
-          <View style={styles.stepBody}>
-            <Text style={styles.heading}>Your supplements</Text>
-            <Text style={styles.subtext}>Add each supplement with when you take it</Text>
-            {supplementRows.map((row, idx) => (
-              <View key={`sup-${idx}`} style={styles.supplementRowCard}>
-                <TextInput
-                  value={row.name}
-                  onChangeText={(v) =>
-                    setSupplementRows((prev) =>
-                      prev.map((r, i) => (i === idx ? { ...r, name: v } : r))
-                    )
-                  }
-                  placeholder="Name"
-                  placeholderTextColor="#9CA3AF"
-                  style={styles.input}
-                />
-                <TextInput
-                  value={row.timing}
-                  onChangeText={(v) =>
-                    setSupplementRows((prev) =>
-                      prev.map((r, i) => (i === idx ? { ...r, timing: v } : r))
-                    )
-                  }
-                  placeholder="Timing — e.g. Morning with food"
-                  placeholderTextColor="#9CA3AF"
-                  style={styles.input}
-                />
-                {supplementRows.length > 1 ? (
-                  <Pressable
-                    style={styles.removeRowBtn}
-                    onPress={() =>
-                      setSupplementRows((prev) => prev.filter((_, i) => i !== idx))
-                    }
-                  >
-                    <Text style={styles.removeRowBtnText}>Remove</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-            ))}
-            <Pressable
-              style={styles.addMealButton}
-              onPress={() =>
-                setSupplementRows((prev) => [...prev, { name: '', timing: '' }])
-              }
-            >
-              <Text style={styles.addMealButtonText}>+ Add supplement</Text>
-            </Pressable>
-            <Pressable style={styles.primaryButton} onPress={() => advanceAfterConfig(isLast)}>
-              <Text style={styles.primaryButtonText}>
-                {saving && isLast ? 'Saving...' : isLast ? "Let's go" : 'Continue'}
-              </Text>
+              <Text style={styles.primaryButtonText}>{saving ? 'Saving...' : 'Continue'}</Text>
             </Pressable>
           </View>
         );
@@ -972,9 +971,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
               <Text style={styles.addMealButtonText}>+ Add custom tracker</Text>
             </Pressable>
             <Pressable style={styles.primaryButton} onPress={() => advanceAfterConfig(isLast)}>
-              <Text style={styles.primaryButtonText}>
-                {saving && isLast ? 'Saving...' : isLast ? "Let's go" : 'Continue'}
-              </Text>
+              <Text style={styles.primaryButtonText}>{saving ? 'Saving...' : 'Continue'}</Text>
             </Pressable>
           </View>
         );
@@ -1075,9 +1072,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
                   advanceAfterConfig(isLast);
                 }}
               >
-                <Text style={styles.primaryButtonText}>
-                  {saving && isLast ? 'Saving...' : isLast ? "Let's go" : 'Continue'}
-                </Text>
+                <Text style={styles.primaryButtonText}>{saving ? 'Saving...' : 'Continue'}</Text>
               </Pressable>
             </View>
 
@@ -1163,7 +1158,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
     return null;
   };
 
-  const stepTotalDenominator = step >= 9 ? 9 + configStepTotal : 9;
+  const stepTotalDenominator = configFlowOrder.length > 0 ? 9 + configFlowOrder.length : 10;
 
   const topBar =
     step > 0 ? (
@@ -1186,7 +1181,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
 
   return (
     <SafeAreaView style={styles.screen}>
-      {step >= 9 ? (
+      {step >= 8 && step < 8 + configFlowOrder.length ? (
         <KeyboardAvoidingView
           style={styles.keyboardAvoidingFill}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -1242,11 +1237,12 @@ const styles = StyleSheet.create({
   backText: {
     color: '#D1D5DB',
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
   },
   stepText: {
     color: '#9CA3AF',
     fontSize: 13,
+    fontFamily: FONT_BODY,
   },
   centerStep: {
     flex: 1,
@@ -1259,7 +1255,7 @@ const styles = StyleSheet.create({
   },
   appName: {
     fontSize: 34,
-    fontWeight: '800',
+    fontFamily: FONT_EXTRA,
     color: '#FAFAFA',
     textAlign: 'center',
   },
@@ -1269,10 +1265,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#D1D5DB',
     textAlign: 'center',
+    fontFamily: FONT_BODY,
   },
   heading: {
     fontSize: 28,
-    fontWeight: '700',
+    fontFamily: FONT_EXTRA,
     color: '#FAFAFA',
     marginBottom: 14,
   },
@@ -1281,6 +1278,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     marginBottom: 14,
+    fontFamily: FONT_BODY,
+  },
+  rewardSubtext: {
+    fontSize: 15,
+    color: '#FAFAFA',
+    lineHeight: 22,
+    textAlign: 'center',
+    fontStyle: 'italic',
+    fontFamily: FONT_BODY,
   },
   input: {
     backgroundColor: '#2E2E2E',
@@ -1290,6 +1296,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 11,
     fontSize: 15,
+    fontFamily: FONT_BODY,
     color: '#FAFAFA',
     marginBottom: 18,
   },
@@ -1319,7 +1326,7 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
   },
   visionBoardDescription: {
     fontSize: 13,
@@ -1327,12 +1334,13 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     textAlign: 'center',
     marginBottom: 16,
+    fontFamily: FONT_BODY,
   },
   skipText: {
     marginTop: 14,
     textAlign: 'center',
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
     color: '#9CA3AF',
   },
   chipsWrap: {
@@ -1356,7 +1364,7 @@ const styles = StyleSheet.create({
   chipText: {
     color: '#D1D5DB',
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
   },
   chipTextSelected: {
     color: '#FFFFFF',
@@ -1407,7 +1415,7 @@ const styles = StyleSheet.create({
   },
   targetCardText: {
     color: '#D1D5DB',
-    fontWeight: '700',
+    fontFamily: FONT_SEMIBOLD,
   },
   targetCardTextSelected: {
     color: '#FFFFFF',
@@ -1415,6 +1423,8 @@ const styles = StyleSheet.create({
   previewSubtext: {
     color: '#D1D5DB',
     marginBottom: 14,
+    fontFamily: FONT_BODY,
+    fontSize: 14,
   },
   builderCard: {
     borderRadius: 14,
@@ -1442,7 +1452,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     color: '#FAFAFA',
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
   },
   mealTypeDropdownChevron: {
     fontSize: 12,
@@ -1469,7 +1479,7 @@ const styles = StyleSheet.create({
   },
   mealTypeModalTitle: {
     fontSize: 18,
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     color: '#FAFAFA',
     marginBottom: 12,
   },
@@ -1484,7 +1494,7 @@ const styles = StyleSheet.create({
   mealTypeModalOptionText: {
     fontSize: 16,
     color: '#FAFAFA',
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
   },
   mealTypeCustomWrap: {
     gap: 12,
@@ -1493,6 +1503,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#D1D5DB',
     marginBottom: 4,
+    fontFamily: FONT_BODY,
   },
   mealTypeCustomActions: {
     flexDirection: 'row',
@@ -1509,7 +1520,7 @@ const styles = StyleSheet.create({
   },
   mealTypeModalSecondaryBtnText: {
     color: '#D1D5DB',
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
   },
   mealTypeModalPrimaryBtn: {
     flex: 1,
@@ -1520,7 +1531,7 @@ const styles = StyleSheet.create({
   },
   mealTypeModalPrimaryBtnText: {
     color: '#FFFFFF',
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
   },
   mealTypeModalCancel: {
     marginTop: 14,
@@ -1530,7 +1541,7 @@ const styles = StyleSheet.create({
   mealTypeModalCancelText: {
     color: '#9CA3AF',
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: FONT_BODY,
   },
   emojiPill: {
     borderRadius: 999,
@@ -1590,12 +1601,12 @@ const styles = StyleSheet.create({
   },
   addMealButtonText: {
     color: '#D1D5DB',
-    fontWeight: '800',
+    fontFamily: FONT_EXTRA,
   },
   errorText: {
     color: '#FCA5A5',
     fontSize: 13,
-    fontWeight: '700',
+    fontFamily: FONT_SEMIBOLD,
     marginBottom: 12,
   },
   inputError: {
@@ -1627,7 +1638,7 @@ const styles = StyleSheet.create({
     color: '#D1D5DB',
     fontSize: 14,
     textAlign: 'center',
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
   },
   trackingGrid: {
     flexDirection: 'row',
@@ -1660,27 +1671,19 @@ const styles = StyleSheet.create({
   trackingCardTitle: {
     color: '#FAFAFA',
     fontSize: 13,
-    fontWeight: '700',
+    fontFamily: FONT_SEMIBOLD,
     marginBottom: 4,
   },
   trackingCardSubtitle: {
     color: '#9CA3AF',
     fontSize: 11,
     lineHeight: 14,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
   },
   trackingWarning: {
     color: '#EF4444',
     fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  supplementRowCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#3F3F3F',
-    backgroundColor: SURFACE,
-    padding: 12,
+    fontFamily: FONT_BOLD,
     marginBottom: 12,
   },
   removeRowBtn: {
@@ -1691,7 +1694,7 @@ const styles = StyleSheet.create({
   },
   removeRowBtnText: {
     color: '#F87171',
-    fontWeight: '700',
+    fontFamily: FONT_BOLD,
     fontSize: 14,
   },
   customRowCard: {
@@ -1742,7 +1745,7 @@ const styles = StyleSheet.create({
   addAnotherLinkText: {
     color: '#9CA3AF',
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
   },
   intentionChipsRow: {
     flexDirection: 'row',
@@ -1757,7 +1760,7 @@ const styles = StyleSheet.create({
   intentionChipText: {
     color: '#D1D5DB',
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: FONT_SEMIBOLD,
     textDecorationLine: 'underline',
   },
   intentionsContinueButton: {
