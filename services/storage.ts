@@ -4,6 +4,25 @@ export function getTodayKey(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+/**
+ * Plan day index using the device's local calendar (not raw 24h elapsed from the ISO timestamp).
+ * Day 1 is the calendar day of `plan_start_date` in local time; increments at local midnight.
+ */
+export function computePlanDayFromPlanStart(planStartRaw: string | null): number {
+  if (!planStartRaw?.trim()) {
+    return 1;
+  }
+  const start = new Date(planStartRaw);
+  if (Number.isNaN(start.getTime())) {
+    return 1;
+  }
+  const startLocal = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const n = new Date();
+  const todayLocal = new Date(n.getFullYear(), n.getMonth(), n.getDate());
+  const diffDays = Math.round((todayLocal.getTime() - startLocal.getTime()) / (24 * 60 * 60 * 1000));
+  return Math.max(1, diffDays + 1);
+}
+
 export type MealTicksPayload = { done: number; total: number };
 
 export function parseMealTicks(raw: string | null): MealTicksPayload | null {

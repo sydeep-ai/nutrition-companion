@@ -18,52 +18,20 @@ import TodayScreen from './app/index';
 import OnboardingScreen from './app/onboarding';
 import MilestoneCelebration, {
   MilestoneCelebrationPayload,
-  MilestoneDay,
-  MILESTONE_TRIGGER_DAY_FOR_7,
-  MILESTONE_TRIGGER_DAY_FOR_14,
-  MILESTONE_TRIGGER_DAY_FOR_30,
+  isPlanDayEligibleForMilestoneCelebration,
+  pickMilestoneToShow,
 } from './components/MilestoneCelebration';
 import MotivationalQuote, { motivationalQuotes } from './components/MotivationalQuote';
 import DashboardScreen from './app/dashboard';
 import HistoryScreen from './app/history';
 import SettingsScreen from './app/settings';
 import { scheduleAllNotifications } from './services/notifications';
+import { computePlanDayFromPlanStart } from './services/storage';
 
 const LAST_QUOTE_DATE_KEY = 'last_quote_date';
 const MILESTONE_7_KEY = 'milestone_shown_7';
 const MILESTONE_14_KEY = 'milestone_shown_14';
 const MILESTONE_30_KEY = 'milestone_shown_30';
-
-function computeCurrentPlanDay(planStartRaw: string | null): number {
-  if (!planStartRaw?.trim()) {
-    return 1;
-  }
-  const start = new Date(planStartRaw);
-  if (Number.isNaN(start.getTime())) {
-    return 1;
-  }
-  const diffMs = Date.now() - start.getTime();
-  const day = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
-  return Math.max(1, day);
-}
-
-function pickMilestoneToShow(
-  day: number,
-  shown7: boolean,
-  shown14: boolean,
-  shown30: boolean
-): MilestoneDay | null {
-  if (day >= MILESTONE_TRIGGER_DAY_FOR_30 && !shown30) {
-    return 30;
-  }
-  if (day >= MILESTONE_TRIGGER_DAY_FOR_14 && !shown14) {
-    return 14;
-  }
-  if (day >= MILESTONE_TRIGGER_DAY_FOR_7 && !shown7) {
-    return 7;
-  }
-  return null;
-}
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -73,7 +41,7 @@ function HistoryRoute() {
   return <HistoryScreen onBack={() => navigation.goBack()} />;
 }
 
-function MainTabs() {
+function MainTabs({ onResetToOnboarding }: { onResetToOnboarding: () => void }) {
   const openEditPlanRef = useRef<(() => void) | null>(null);
 
   return (
@@ -130,16 +98,20 @@ function MainTabs() {
           tabBarIcon: () => <Text style={{ fontSize: 26 }}>⚙️</Text>,
         }}
       >
-        {() => <SettingsScreen openEditPlanRef={openEditPlanRef} />}
+        {() => (
+          <SettingsScreen openEditPlanRef={openEditPlanRef} onResetToOnboarding={onResetToOnboarding} />
+        )}
       </Tab.Screen>
     </Tab.Navigator>
   );
 }
 
-function RootNavigator() {
+function RootNavigator({ onResetToOnboarding }: { onResetToOnboarding: () => void }) {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Main" component={MainTabs} />
+      <Stack.Screen name="Main">
+        {() => <MainTabs onResetToOnboarding={onResetToOnboarding} />}
+      </Stack.Screen>
       <Stack.Screen name="History" component={HistoryRoute} />
     </Stack.Navigator>
   );
@@ -200,7 +172,7 @@ export default function App() {
           'reward_photo',
         ]);
 
-        const currentDay = computeCurrentPlanDay(planStartRaw[1] ?? null);
+        const currentDay = computePlanDayFromPlanStart(planStartRaw[1] ?? null);
         const targetParsed = parseInt(targetDaysRaw[1] ?? '', 10);
         const targetDays =
           Number.isFinite(targetParsed) && targetParsed > 0 ? Math.floor(targetParsed) : 30;
@@ -211,7 +183,10 @@ export default function App() {
 
         const milestoneKind = pickMilestoneToShow(currentDay, shown7, shown14, shown30);
 
-        if (milestoneKind) {
+        if (
+          milestoneKind &&
+          isPlanDayEligibleForMilestoneCelebration(currentDay, milestoneKind)
+        ) {
           const percent = Math.min(
             100,
             Math.max(0, Math.round((currentDay / Math.max(1, targetDays)) * 100))
@@ -288,7 +263,7 @@ export default function App() {
         'reward_photo',
       ]);
 
-      const currentDay = computeCurrentPlanDay(planStartRaw[1] ?? null);
+      const currentDay = computePlanDayFromPlanStart(planStartRaw[1] ?? null);
       const targetParsed = parseInt(targetDaysRaw[1] ?? '', 10);
       const targetDays =
         Number.isFinite(targetParsed) && targetParsed > 0 ? Math.floor(targetParsed) : 30;
@@ -299,7 +274,10 @@ export default function App() {
 
       const milestoneKind = pickMilestoneToShow(currentDay, shown7, shown14, shown30);
 
-      if (milestoneKind) {
+      if (
+        milestoneKind &&
+        isPlanDayEligibleForMilestoneCelebration(currentDay, milestoneKind)
+      ) {
         const percent = Math.min(
           100,
           Math.max(0, Math.round((currentDay / Math.max(1, targetDays)) * 100))
@@ -347,6 +325,21 @@ export default function App() {
   }, [milestonePayload, deferDailyQuoteAfterMilestone]);
 
   useEffect(() => {
+    if (!showMilestone || !milestonePayload) {
+      return;
+    }
+    if (
+      !isPlanDayEligibleForMilestoneCelebration(
+        milestonePayload.currentDay,
+        milestonePayload.milestone
+      )
+    ) {
+      setShowMilestone(false);
+      setMilestonePayload(null);
+    }
+  }, [showMilestone, milestonePayload]);
+
+  useEffect(() => {
     if (!onboardingComplete) {
       return;
     }
@@ -373,7 +366,15 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <NavigationContainer>
-        <RootNavigator />
+        <RootNavigator
+          onResetToOnboarding={() => {
+            setShowMilestone(false);
+            setMilestonePayload(null);
+            setShowDailyQuote(false);
+            setDeferDailyQuoteAfterMilestone(false);
+            setOnboardingComplete(false);
+          }}
+        />
       </NavigationContainer>
       {showDailyQuote ? (
         <MotivationalQuote visible={showDailyQuote} quote={dailyQuote} onLetsGo={handleLetsGo} />

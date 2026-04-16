@@ -21,7 +21,7 @@ import {
   parseMealPlanFromStorage,
   PlanMeal,
 } from '../data/defaultMealPlan';
-import { calculateStreak, parseMealTicks } from '../services/storage';
+import { calculateStreak, computePlanDayFromPlanStart, parseMealTicks } from '../services/storage';
 
 const ACCENT = '#D85A30';
 const SURFACE = '#2E2E2E';
@@ -404,18 +404,10 @@ export default function DashboardScreen({
     };
   }, [visionPhotos.length, visionCardWidth, visionCardGap]);
 
-  const dayCounter = useMemo(() => {
-    if (!planStartDate) {
-      return 1;
-    }
-    const start = new Date(planStartDate);
-    if (Number.isNaN(start.getTime())) {
-      return 1;
-    }
-    const diffMs = Date.now() - start.getTime();
-    const day = Math.floor(diffMs / (1000 * 60 * 60 * 24)) + 1;
-    return Math.max(1, day);
-  }, [planStartDate]);
+  const dayCounter = useMemo(
+    () => computePlanDayFromPlanStart(planStartDate || null),
+    [planStartDate]
+  );
 
   const formatDateForInput = (raw: string) => {
     if (!raw) {

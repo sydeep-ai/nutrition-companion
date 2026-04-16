@@ -38,13 +38,55 @@ export type MilestoneCelebrationPayload = {
 };
 
 /**
- * Production milestone gates (plan day from App.tsx, inclusive).
- * Day-7 screen only when day >= 7; day-14 when day >= 14; day-30 when day >= 30.
- * Do not use test thresholds (1 / 2 / 3) here.
+ * Production milestone gates (inclusive plan-day index from App.tsx).
+ * Day 7 celebration: only when currentDay >= 7.
+ * Day 14 celebration: only when currentDay >= 14.
+ * Day 30 celebration: only when currentDay >= 30.
  */
 export const MILESTONE_TRIGGER_DAY_FOR_7 = 7 as const;
 export const MILESTONE_TRIGGER_DAY_FOR_14 = 14 as const;
 export const MILESTONE_TRIGGER_DAY_FOR_30 = 30 as const;
+
+export function pickMilestoneToShow(
+  currentDay: number,
+  shown7: boolean,
+  shown14: boolean,
+  shown30: boolean
+): MilestoneDay | null {
+  const d0 = Number(currentDay);
+  const d = Number.isFinite(d0) && d0 >= 1 ? Math.floor(d0) : 1;
+  if (d < MILESTONE_TRIGGER_DAY_FOR_7) {
+    return null;
+  }
+  if (d >= MILESTONE_TRIGGER_DAY_FOR_30 && !shown30) {
+    return 30;
+  }
+  if (d >= MILESTONE_TRIGGER_DAY_FOR_14 && !shown14) {
+    return 14;
+  }
+  if (d >= MILESTONE_TRIGGER_DAY_FOR_7 && !shown7) {
+    return 7;
+  }
+  return null;
+}
+
+export function isPlanDayEligibleForMilestoneCelebration(
+  currentDay: number,
+  milestone: MilestoneDay
+): boolean {
+  const d0 = Number(currentDay);
+  const d = Number.isFinite(d0) && d0 >= 1 ? Math.floor(d0) : 1;
+  if (milestone === 7) {
+    return d >= MILESTONE_TRIGGER_DAY_FOR_7;
+  }
+  if (milestone === 14) {
+    return d >= MILESTONE_TRIGGER_DAY_FOR_14;
+  }
+  if (milestone === 30) {
+    return d >= MILESTONE_TRIGGER_DAY_FOR_30;
+  }
+  return false;
+}
 
 type Props = {
   visible: boolean;
@@ -116,7 +158,7 @@ function buildPersonalMessage(
     if (w) {
       return `Two weeks strong, ${n}. "${g}" and your why — ${w} — with ${r} still ahead. You're stacking proof.`;
     }
-    return `Two weeks strong, ${n}. "${g}" is adding up, and ${r} is closer than on Day 1.`;
+    return `Two weeks strong, ${n}. "${g}" is adding up, and ${r} is closer than when you started.`;
   }
   if (w) {
     return `${n}: 30 days living "${g}", driven by ${w}. ${r} isn't hypothetical anymore — you earned this chapter.`;
@@ -238,6 +280,10 @@ export default function MilestoneCelebration({ visible, payload, onDismiss }: Pr
   }, [payload, sharing]);
 
   if (!payload) {
+    return null;
+  }
+
+  if (!isPlanDayEligibleForMilestoneCelebration(payload.currentDay, payload.milestone)) {
     return null;
   }
 

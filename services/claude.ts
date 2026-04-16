@@ -5,24 +5,29 @@ const ANTHROPIC_MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
 
 const EXTRA_KEY_SENTINEL = 'EXPO_PUBLIC_ANTHROPIC_API_KEY';
 
-/** Prefer env (Metro inlines EXPO_PUBLIC_*); fall back to app extra from app.config.js / EAS. */
+function readAnthropicKeyFromExpoExtra(): string {
+  const root = (Constants.expoConfig ?? Constants.manifest) as
+    | { extra?: Record<string, unknown> }
+    | null
+    | undefined;
+  const raw = root?.extra?.anthropicApiKey;
+  if (typeof raw !== 'string') {
+    return '';
+  }
+  const t = raw.trim();
+  if (t.length === 0 || t === EXTRA_KEY_SENTINEL) {
+    return '';
+  }
+  return t;
+}
+
+/** Primary: Metro / EAS inlines EXPO_PUBLIC_* at build. Fallback: app.config.js `extra.anthropicApiKey`. */
 function getAnthropicApiKey(): string {
   const fromEnv = String(process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY ?? '').trim();
-  console.log('Key length:', (process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY || '').length);
-
   if (fromEnv.length > 0) {
     return fromEnv;
   }
-
-  const rawExtra = Constants.expoConfig?.extra?.anthropicApiKey;
-  if (typeof rawExtra === 'string') {
-    const t = rawExtra.trim();
-    if (t.length > 0 && t !== EXTRA_KEY_SENTINEL) {
-      return t;
-    }
-  }
-
-  return '';
+  return readAnthropicKeyFromExpoExtra();
 }
 
 const TRACKING_CONFIG_KEY = 'tracking_config';

@@ -10,6 +10,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import { FONT_BODY, FONT_SEMIBOLD, FONT_BOLD, FONT_EXTRA } from '../constants/fonts';
@@ -87,13 +88,14 @@ function newMealId(): string {
 
 type Props = {
   openEditPlanRef: React.MutableRefObject<(() => void) | null>;
+  onResetToOnboarding?: () => void;
 };
 
 type EditField = null | 'goal' | 'why' | 'intentions';
 
 const MAX_INTENTIONS = 5;
 
-export default function SettingsScreen({ openEditPlanRef: _openEditPlanRef }: Props) {
+export default function SettingsScreen({ openEditPlanRef: _openEditPlanRef, onResetToOnboarding }: Props) {
   const navigation = useNavigation();
   const [goalDraft, setGoalDraft] = useState('');
   const [whyDraft, setWhyDraft] = useState('');
@@ -175,7 +177,17 @@ export default function SettingsScreen({ openEditPlanRef: _openEditPlanRef }: Pr
   }, []);
 
   const openEditPlanModal = useCallback(() => {
-    void loadEditPlanState().then(() => setEditPlanVisible(true));
+    void (async () => {
+      try {
+        await loadEditPlanState();
+        setEditPlanVisible(true);
+      } catch (e) {
+        Alert.alert(
+          'Could not open plan editor',
+          e instanceof Error ? e.message : 'Please try again.'
+        );
+      }
+    })();
   }, [loadEditPlanState]);
 
   const toggleEditTracking = (id: TrackingId) => {
@@ -355,8 +367,8 @@ export default function SettingsScreen({ openEditPlanRef: _openEditPlanRef }: Pr
           onPress: () =>
             void (async () => {
               try {
-                const keys = await AsyncStorage.getAllKeys();
-                await AsyncStorage.multiRemove(keys);
+                const allKeys = await AsyncStorage.getAllKeys();
+                await AsyncStorage.multiRemove(allKeys);
               } catch (e) {
                 Alert.alert(
                   'Reset failed',
@@ -364,14 +376,9 @@ export default function SettingsScreen({ openEditPlanRef: _openEditPlanRef }: Pr
                 );
                 return;
               }
-              try {
-                (
-                  navigation as unknown as {
-                    reset?: (s: { index: number; routes: { name: string }[] }) => void;
-                  }
-                ).reset?.({ index: 0, routes: [{ name: 'Onboarding' }] });
-              } catch {
-                /* Onboarding is not in this navigator tree */
+              if (onResetToOnboarding) {
+                onResetToOnboarding();
+                return;
               }
               try {
                 DevSettings.reload();
@@ -431,18 +438,30 @@ export default function SettingsScreen({ openEditPlanRef: _openEditPlanRef }: Pr
         <Text style={styles.screenTitle}>Settings</Text>
 
         <Text style={styles.sectionTitle}>My Plan</Text>
-        <Pressable style={styles.row} onPress={openEditPlanModal}>
+        <TouchableOpacity
+          style={styles.row}
+          onPress={openEditPlanModal}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Edit plan"
+        >
           <Text style={styles.rowLabel}>Edit Plan</Text>
           <Text style={styles.chevron}>›</Text>
-        </Pressable>
+        </TouchableOpacity>
         <Pressable style={styles.row} onPress={openTrackRecord}>
           <Text style={styles.rowLabel}>Track Record</Text>
           <Text style={styles.chevron}>›</Text>
         </Pressable>
-        <Pressable style={styles.row} onPress={confirmReset}>
+        <TouchableOpacity
+          style={styles.row}
+          onPress={confirmReset}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Reset all data"
+        >
           <Text style={[styles.rowLabel, styles.rowDanger]}>Reset</Text>
           <Text style={styles.chevron}>›</Text>
-        </Pressable>
+        </TouchableOpacity>
 
         <Text style={styles.sectionTitle}>My Profile</Text>
         <Pressable style={styles.row} onPress={() => setEditing('goal')}>
@@ -506,10 +525,16 @@ export default function SettingsScreen({ openEditPlanRef: _openEditPlanRef }: Pr
         ) : null}
 
         <Text style={styles.sectionTitle}>App</Text>
-        <Pressable style={styles.row} onPress={clearToday}>
+        <TouchableOpacity
+          style={styles.row}
+          onPress={clearToday}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Clear today data"
+        >
           <Text style={styles.rowLabel}>Clear today&apos;s data</Text>
           <Text style={styles.chevron}>›</Text>
-        </Pressable>
+        </TouchableOpacity>
         <Text style={styles.version}>Version 1.0.0</Text>
       </ScrollView>
 
