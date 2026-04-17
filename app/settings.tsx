@@ -4,7 +4,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   DevSettings,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -539,22 +541,22 @@ export default function SettingsScreen({ openEditPlanRef: _openEditPlanRef, onRe
       </ScrollView>
 
       <Modal visible={editPlanVisible} animationType="slide" presentationStyle="fullScreen">
-        <SafeAreaView style={styles.modalSafe} edges={['top', 'bottom']}>
-          <View style={styles.modalHeader}>
-            <Pressable onPress={dismissEditPlan} hitSlop={12}>
-              <Text style={styles.modalHeaderBtn}>Cancel</Text>
-            </Pressable>
-            <Text style={styles.modalTitle}>Edit plan</Text>
-            <Pressable onPress={() => void saveEditPlan()} hitSlop={12}>
-              <Text style={styles.modalHeaderBtnPrimary}>Save</Text>
-            </Pressable>
-          </View>
-
-          <ScrollView
-            style={styles.modalScroll}
-            contentContainerStyle={styles.modalScrollContent}
-            keyboardShouldPersistTaps="handled"
+        <SafeAreaView style={styles.modalSafe} edges={['top']}>
+          <KeyboardAvoidingView
+            style={styles.modalKavRoot}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={0}
           >
+            <View style={styles.modalKavInner}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Edit plan</Text>
+              </View>
+
+              <ScrollView
+                style={styles.modalScroll}
+                contentContainerStyle={styles.modalScrollContent}
+                keyboardShouldPersistTaps="handled"
+              >
             <Text style={styles.modalSectionLabel}>Tracking</Text>
             <View style={styles.trackingGrid}>
               {TRACKING_GRID_ITEMS.map((item) => {
@@ -688,7 +690,30 @@ export default function SettingsScreen({ openEditPlanRef: _openEditPlanRef, onRe
                 </Pressable>
               </View>
             ) : null}
-          </ScrollView>
+              </ScrollView>
+
+              <View style={styles.editPlanBottomBar}>
+                <TouchableOpacity
+                  style={styles.editPlanSaveBtn}
+                  onPress={() => void saveEditPlan()}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Save plan"
+                >
+                  <Text style={styles.editPlanSaveBtnText}>Save</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.editPlanCancelBtn}
+                  onPress={dismissEditPlan}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel editing plan"
+                >
+                  <Text style={styles.editPlanCancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
@@ -801,10 +826,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: BG,
   },
+  modalKavRoot: {
+    flex: 1,
+  },
+  modalKavInner: {
+    flex: 1,
+  },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'center',
     paddingHorizontal: 12,
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -815,24 +846,48 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontFamily: FONT_BOLD,
   },
-  modalHeaderBtn: {
-    color: GREY,
-    fontSize: 16,
-    fontFamily: FONT_SEMIBOLD,
-    paddingHorizontal: 8,
-  },
-  modalHeaderBtnPrimary: {
-    color: ACCENT,
-    fontSize: 16,
-    fontFamily: FONT_BOLD,
-    paddingHorizontal: 8,
-  },
   modalScroll: {
     flex: 1,
   },
   modalScrollContent: {
     padding: 16,
-    paddingBottom: 40,
+    paddingBottom: 120,
+  },
+  editPlanBottomBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#1A1A1A',
+    padding: 16,
+    paddingBottom: 32,
+  },
+  editPlanSaveBtn: {
+    width: '100%',
+    backgroundColor: '#D85A30',
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editPlanSaveBtnText: {
+    color: '#FFFFFF',
+    fontFamily: FONT_BOLD,
+    fontSize: 16,
+  },
+  editPlanCancelBtn: {
+    width: '100%',
+    backgroundColor: '#2E2E2E',
+    borderRadius: 14,
+    paddingVertical: 14,
+    marginTop: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editPlanCancelBtnText: {
+    color: '#FFFFFF',
+    fontFamily: FONT_BOLD,
+    fontSize: 16,
   },
   modalSectionLabel: {
     color: ACCENT,
