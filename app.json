@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "My Health Coach",
-    "slug": "nutrition-companion",
+    "slug": "my-health-coach",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
