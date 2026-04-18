@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Nutrition Companion",
-    "slug": "nutrition-companion",
+    "name": "My Health Coach",
+    "slug": "my-health-coach",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -10,7 +10,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#1A1A1A"
     },
     "ios": {
       "supportsTablet": true,

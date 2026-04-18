@@ -485,8 +485,8 @@ export default function OnboardingScreen({ onComplete }: Props) {
     if (step === 0) {
       return (
         <View style={styles.centerStep}>
-          <Text style={styles.appName}>Nutrition Companion</Text>
-          <Text style={styles.tagline}>Built around your why.</Text>
+          <Text style={styles.appName}>My Health Coach</Text>
+          <Text style={styles.tagline}>Show up. Track it. Earn it.</Text>
           <Pressable style={styles.letsGetStartedButton} onPress={goNext}>
             <Text style={styles.primaryButtonText}>Let&apos;s get started</Text>
           </Pressable>

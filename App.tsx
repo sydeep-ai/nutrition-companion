@@ -25,9 +25,11 @@ import MotivationalQuote, { motivationalQuotes } from './components/Motivational
 import DashboardScreen from './app/dashboard';
 import HistoryScreen from './app/history';
 import SettingsScreen from './app/settings';
+import AppIntro from './components/AppIntro';
 import { scheduleAllNotifications } from './services/notifications';
 import { computePlanDayFromPlanStart } from './services/storage';
 
+const INTRO_COMPLETE_KEY = 'intro_complete';
 const LAST_QUOTE_DATE_KEY = 'last_quote_date';
 const MILESTONE_7_KEY = 'milestone_shown_7';
 const MILESTONE_14_KEY = 'milestone_shown_14';
@@ -127,104 +129,115 @@ export default function App() {
 
   const [hydrating, setHydrating] = useState(true);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
+  const [introComplete, setIntroComplete] = useState(false);
   const [showDailyQuote, setShowDailyQuote] = useState(false);
   const [dailyQuote, setDailyQuote] = useState('');
   const [milestonePayload, setMilestonePayload] = useState<MilestoneCelebrationPayload | null>(null);
   const [showMilestone, setShowMilestone] = useState(false);
   const [deferDailyQuoteAfterMilestone, setDeferDailyQuoteAfterMilestone] = useState(false);
 
+  const runPostIntroBootstrap = useCallback(async () => {
+    const today = new Date().toISOString().split('T')[0];
+    const lastQuote = await AsyncStorage.getItem(LAST_QUOTE_DATE_KEY);
+    const needsDailyQuote = lastQuote !== today;
+
+    const [
+      planStartRaw,
+      targetDaysRaw,
+      m7Raw,
+      m14Raw,
+      m30Raw,
+      userNameRaw,
+      userGoalRaw,
+      userWhyRaw,
+      rewardNameRaw,
+      rewardPhotoRaw,
+    ] = await AsyncStorage.multiGet([
+      'plan_start_date',
+      'target_days',
+      MILESTONE_7_KEY,
+      MILESTONE_14_KEY,
+      MILESTONE_30_KEY,
+      'user_name',
+      'user_goal',
+      'user_why',
+      'reward_name',
+      'reward_photo',
+    ]);
+
+    const currentDay = computePlanDayFromPlanStart(planStartRaw[1] ?? null);
+    const targetParsed = parseInt(targetDaysRaw[1] ?? '', 10);
+    const targetDays =
+      Number.isFinite(targetParsed) && targetParsed > 0 ? Math.floor(targetParsed) : 30;
+
+    const shown7 = m7Raw[1] === 'true';
+    const shown14 = m14Raw[1] === 'true';
+    const shown30 = m30Raw[1] === 'true';
+
+    const milestoneKind = pickMilestoneToShow(currentDay, shown7, shown14, shown30);
+
+    if (milestoneKind && isPlanDayEligibleForMilestoneCelebration(currentDay, milestoneKind)) {
+      const percent = Math.min(
+        100,
+        Math.max(0, Math.round((currentDay / Math.max(1, targetDays)) * 100))
+      );
+      setMilestonePayload({
+        milestone: milestoneKind,
+        currentDay,
+        targetDays,
+        percent,
+        userName: userNameRaw[1]?.trim() || 'friend',
+        userGoal: userGoalRaw[1]?.trim() || '',
+        userWhy: userWhyRaw[1]?.trim() || '',
+        rewardName: rewardNameRaw[1]?.trim() || '',
+        rewardPhotoUri: rewardPhotoRaw[1]?.trim() || null,
+      });
+      setShowMilestone(true);
+      setShowDailyQuote(false);
+      setDeferDailyQuoteAfterMilestone(needsDailyQuote);
+      if (needsDailyQuote) {
+        const quoteIndex = Math.floor(Math.random() * motivationalQuotes.length);
+        setDailyQuote(motivationalQuotes[quoteIndex] ?? motivationalQuotes[0]);
+      }
+    } else if (needsDailyQuote) {
+      const quoteIndex = Math.floor(Math.random() * motivationalQuotes.length);
+      setDailyQuote(motivationalQuotes[quoteIndex] ?? motivationalQuotes[0]);
+      setShowDailyQuote(true);
+      setDeferDailyQuoteAfterMilestone(false);
+    } else {
+      setShowDailyQuote(false);
+      setDeferDailyQuoteAfterMilestone(false);
+    }
+  }, []);
+
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        const onboardingFlag = await AsyncStorage.getItem('onboarding_complete');
-        const complete = onboardingFlag === 'true';
+        const [onboardingFlag, introRaw] = await AsyncStorage.multiGet([
+          'onboarding_complete',
+          INTRO_COMPLETE_KEY,
+        ]);
+        const complete = onboardingFlag[1] === 'true';
+        const introDone = introRaw[1] === 'true';
         setOnboardingComplete(complete);
+        setIntroComplete(introDone);
 
         if (!complete) {
           return;
         }
 
-        const today = new Date().toISOString().split('T')[0];
-        const lastQuote = await AsyncStorage.getItem(LAST_QUOTE_DATE_KEY);
-        const needsDailyQuote = lastQuote !== today;
-
-        const [
-          planStartRaw,
-          targetDaysRaw,
-          m7Raw,
-          m14Raw,
-          m30Raw,
-          userNameRaw,
-          userGoalRaw,
-          userWhyRaw,
-          rewardNameRaw,
-          rewardPhotoRaw,
-        ] = await AsyncStorage.multiGet([
-          'plan_start_date',
-          'target_days',
-          MILESTONE_7_KEY,
-          MILESTONE_14_KEY,
-          MILESTONE_30_KEY,
-          'user_name',
-          'user_goal',
-          'user_why',
-          'reward_name',
-          'reward_photo',
-        ]);
-
-        const currentDay = computePlanDayFromPlanStart(planStartRaw[1] ?? null);
-        const targetParsed = parseInt(targetDaysRaw[1] ?? '', 10);
-        const targetDays =
-          Number.isFinite(targetParsed) && targetParsed > 0 ? Math.floor(targetParsed) : 30;
-
-        const shown7 = m7Raw[1] === 'true';
-        const shown14 = m14Raw[1] === 'true';
-        const shown30 = m30Raw[1] === 'true';
-
-        const milestoneKind = pickMilestoneToShow(currentDay, shown7, shown14, shown30);
-
-        if (
-          milestoneKind &&
-          isPlanDayEligibleForMilestoneCelebration(currentDay, milestoneKind)
-        ) {
-          const percent = Math.min(
-            100,
-            Math.max(0, Math.round((currentDay / Math.max(1, targetDays)) * 100))
-          );
-          setMilestonePayload({
-            milestone: milestoneKind,
-            currentDay,
-            targetDays,
-            percent,
-            userName: userNameRaw[1]?.trim() || 'friend',
-            userGoal: userGoalRaw[1]?.trim() || '',
-            userWhy: userWhyRaw[1]?.trim() || '',
-            rewardName: rewardNameRaw[1]?.trim() || '',
-            rewardPhotoUri: rewardPhotoRaw[1]?.trim() || null,
-          });
-          setShowMilestone(true);
-          setShowDailyQuote(false);
-          setDeferDailyQuoteAfterMilestone(needsDailyQuote);
-          if (needsDailyQuote) {
-            const quoteIndex = Math.floor(Math.random() * motivationalQuotes.length);
-            setDailyQuote(motivationalQuotes[quoteIndex] ?? motivationalQuotes[0]);
-          }
-        } else if (needsDailyQuote) {
-          const quoteIndex = Math.floor(Math.random() * motivationalQuotes.length);
-          setDailyQuote(motivationalQuotes[quoteIndex] ?? motivationalQuotes[0]);
-          setShowDailyQuote(true);
-          setDeferDailyQuoteAfterMilestone(false);
-        } else {
-          setShowDailyQuote(false);
-          setDeferDailyQuoteAfterMilestone(false);
+        if (!introDone) {
+          return;
         }
+
+        await runPostIntroBootstrap();
       } finally {
         setHydrating(false);
       }
     };
 
     void bootstrap();
-  }, []);
+  }, [runPostIntroBootstrap]);
 
   const handleLetsGo = useCallback(async () => {
     const today = new Date().toISOString().split('T')[0];
@@ -232,82 +245,24 @@ export default function App() {
     setShowDailyQuote(false);
   }, []);
 
+  const handleIntroComplete = useCallback(async () => {
+    await AsyncStorage.setItem(INTRO_COMPLETE_KEY, 'true');
+    setIntroComplete(true);
+    await runPostIntroBootstrap();
+  }, [runPostIntroBootstrap]);
+
   const handleOnboardingComplete = useCallback(() => {
     void (async () => {
       setOnboardingComplete(true);
-      const today = new Date().toISOString().split('T')[0];
-      const lastQuote = await AsyncStorage.getItem(LAST_QUOTE_DATE_KEY);
-      const needsDailyQuote = lastQuote !== today;
-
-      const [
-        planStartRaw,
-        targetDaysRaw,
-        m7Raw,
-        m14Raw,
-        m30Raw,
-        userNameRaw,
-        userGoalRaw,
-        userWhyRaw,
-        rewardNameRaw,
-        rewardPhotoRaw,
-      ] = await AsyncStorage.multiGet([
-        'plan_start_date',
-        'target_days',
-        MILESTONE_7_KEY,
-        MILESTONE_14_KEY,
-        MILESTONE_30_KEY,
-        'user_name',
-        'user_goal',
-        'user_why',
-        'reward_name',
-        'reward_photo',
-      ]);
-
-      const currentDay = computePlanDayFromPlanStart(planStartRaw[1] ?? null);
-      const targetParsed = parseInt(targetDaysRaw[1] ?? '', 10);
-      const targetDays =
-        Number.isFinite(targetParsed) && targetParsed > 0 ? Math.floor(targetParsed) : 30;
-
-      const shown7 = m7Raw[1] === 'true';
-      const shown14 = m14Raw[1] === 'true';
-      const shown30 = m30Raw[1] === 'true';
-
-      const milestoneKind = pickMilestoneToShow(currentDay, shown7, shown14, shown30);
-
-      if (
-        milestoneKind &&
-        isPlanDayEligibleForMilestoneCelebration(currentDay, milestoneKind)
-      ) {
-        const percent = Math.min(
-          100,
-          Math.max(0, Math.round((currentDay / Math.max(1, targetDays)) * 100))
-        );
-        setMilestonePayload({
-          milestone: milestoneKind,
-          currentDay,
-          targetDays,
-          percent,
-          userName: userNameRaw[1]?.trim() || 'friend',
-          userGoal: userGoalRaw[1]?.trim() || '',
-          userWhy: userWhyRaw[1]?.trim() || '',
-          rewardName: rewardNameRaw[1]?.trim() || '',
-          rewardPhotoUri: rewardPhotoRaw[1]?.trim() || null,
-        });
-        setShowMilestone(true);
-        setShowDailyQuote(false);
-        setDeferDailyQuoteAfterMilestone(needsDailyQuote);
-        if (needsDailyQuote) {
-          const quoteIndex = Math.floor(Math.random() * motivationalQuotes.length);
-          setDailyQuote(motivationalQuotes[quoteIndex] ?? motivationalQuotes[0]);
-        }
-      } else if (needsDailyQuote) {
-        const quoteIndex = Math.floor(Math.random() * motivationalQuotes.length);
-        setDailyQuote(motivationalQuotes[quoteIndex] ?? motivationalQuotes[0]);
-        setShowDailyQuote(true);
-        setDeferDailyQuoteAfterMilestone(false);
+      const introRaw = await AsyncStorage.getItem(INTRO_COMPLETE_KEY);
+      if (introRaw === 'true') {
+        setIntroComplete(true);
+        await runPostIntroBootstrap();
+      } else {
+        setIntroComplete(false);
       }
     })();
-  }, []);
+  }, [runPostIntroBootstrap]);
 
   const handleMilestoneDismiss = useCallback(async () => {
     const p = milestonePayload;
@@ -340,13 +295,13 @@ export default function App() {
   }, [showMilestone, milestonePayload]);
 
   useEffect(() => {
-    if (!onboardingComplete) {
+    if (!onboardingComplete || !introComplete) {
       return;
     }
     scheduleAllNotifications().catch(() => {
       /* ignore */
     });
-  }, [onboardingComplete]);
+  }, [onboardingComplete, introComplete]);
 
   if (!fontsLoaded || hydrating) {
     return null;
@@ -356,6 +311,15 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <OnboardingScreen onComplete={handleOnboardingComplete} />
+        <StatusBar style="dark" />
+      </SafeAreaProvider>
+    );
+  }
+
+  if (!introComplete) {
+    return (
+      <SafeAreaProvider>
+        <AppIntro onComplete={handleIntroComplete} />
         <StatusBar style="dark" />
       </SafeAreaProvider>
     );
@@ -372,6 +336,7 @@ export default function App() {
             setMilestonePayload(null);
             setShowDailyQuote(false);
             setDeferDailyQuoteAfterMilestone(false);
+            setIntroComplete(false);
             setOnboardingComplete(false);
           }}
         />

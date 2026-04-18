@@ -399,7 +399,7 @@ export default function SettingsScreen({ openEditPlanRef: _openEditPlanRef, onRe
   const clearToday = () => {
     Alert.alert(
       "Clear today's data?",
-      'This removes every stored value whose key includes today’s date.',
+      "This will reset all of today's tracking. Your plan and goals are not affected.",
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -411,9 +411,8 @@ export default function SettingsScreen({ openEditPlanRef: _openEditPlanRef, onRe
                 const today = new Date().toISOString().split('T')[0];
                 const allKeys = await AsyncStorage.getAllKeys();
                 const todayKeys = allKeys.filter((k) => k.includes(today));
-                if (todayKeys.length > 0) {
-                  await AsyncStorage.multiRemove(todayKeys);
-                }
+                await AsyncStorage.multiRemove(todayKeys);
+                Alert.alert('Done', "Today's data has been cleared.");
               } catch (e) {
                 Alert.alert(
                   'Could not clear',
