@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActionSheetIOS,
   Alert,
@@ -18,6 +18,14 @@ import {
 } from 'react-native';
 import { FONT_BODY, FONT_SEMIBOLD, FONT_BOLD, FONT_EXTRA } from '../constants/fonts';
 import { PlanMeal } from '../data/defaultMealPlan';
+import { AppIntroScreen1, AppIntroScreen2, INTRO_COMPLETE_KEY } from '../components/AppIntro';
+
+/** Welcome (0), then two app-intro screens, then name → … → days, then per-track plan steps. */
+const STEP_APP_INTRO_1 = 1;
+const STEP_APP_INTRO_2 = 2;
+const STEP_NAME = 3;
+const STEP_DAYS = 10;
+const CFG_BASE_STEP = STEP_DAYS + 1;
 
 const ACCENT = '#D85A30';
 const SURFACE = '#2E2E2E';
@@ -147,6 +155,7 @@ function inferTrackingFromIntentionText(blob: string): TrackingId[] {
 
 export default function OnboardingScreen({ onComplete }: Props) {
   const [step, setStep] = useState(0);
+  const [introAlreadyDone, setIntroAlreadyDone] = useState(false);
   const [userName, setUserName] = useState('');
   const [chipGoal, setChipGoal] = useState('');
   const [customGoal, setCustomGoal] = useState('');
@@ -180,6 +189,14 @@ export default function OnboardingScreen({ onComplete }: Props) {
     () => TRACKING_ORDER.filter((id) => trackingOrder.includes(id) && id !== 'supplements'),
     [trackingOrder]
   );
+
+  useEffect(() => {
+    void AsyncStorage.getItem(INTRO_COMPLETE_KEY).then((v) => {
+      if (v === 'true') {
+        setIntroAlreadyDone(true);
+      }
+    });
+  }, []);
 
   const closeMealTypeModal = () => {
     setMealTypeModalIndex(null);
@@ -363,7 +380,30 @@ export default function OnboardingScreen({ onComplete }: Props) {
   };
 
   const goNext = () => setStep((s) => s + 1);
-  const goBack = () => setStep((s) => Math.max(s - 1, 0));
+
+  const advanceFromWelcome = () => {
+    void (async () => {
+      const v = await AsyncStorage.getItem(INTRO_COMPLETE_KEY);
+      if (v === 'true') {
+        setIntroAlreadyDone(true);
+        setStep(STEP_NAME);
+      } else {
+        setStep(STEP_APP_INTRO_1);
+      }
+    })();
+  };
+
+  const goBack = () => {
+    setStep((s) => {
+      if (s <= 0) {
+        return 0;
+      }
+      if (s === STEP_NAME && introAlreadyDone) {
+        return 0;
+      }
+      return s - 1;
+    });
+  };
 
   const toggleTrackingId = (id: TrackingId) => {
     setTrackingSelectionError(false);
@@ -387,7 +427,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
     void AsyncStorage.setItem('tracking_config', JSON.stringify(ordered));
     setTrackingOrder(ordered);
     setTrackingSelectionError(false);
-    setStep(7);
+    setStep(9);
   };
 
   const finishOnboarding = async () => {
@@ -464,7 +504,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
 
   const advanceAfterConfig = (isLast: boolean) => {
     if (isLast) {
-      setStep(8 + configFlowOrder.length);
+      void finishOnboarding();
     } else {
       setStep((s) => s + 1);
     }
@@ -487,14 +527,30 @@ export default function OnboardingScreen({ onComplete }: Props) {
         <View style={styles.centerStep}>
           <Text style={styles.appName}>My Health Coach</Text>
           <Text style={styles.tagline}>Show up. Track it. Earn it.</Text>
-          <Pressable style={styles.letsGetStartedButton} onPress={goNext}>
+          <Pressable style={styles.letsGetStartedButton} onPress={advanceFromWelcome}>
             <Text style={styles.primaryButtonText}>Let&apos;s get started</Text>
           </Pressable>
         </View>
       );
     }
 
-    if (step === 1) {
+    if (step === STEP_APP_INTRO_1) {
+      return <AppIntroScreen1 onNext={() => setStep(STEP_APP_INTRO_2)} />;
+    }
+
+    if (step === STEP_APP_INTRO_2) {
+      return (
+        <AppIntroScreen2
+          onComplete={async () => {
+            await AsyncStorage.setItem(INTRO_COMPLETE_KEY, 'true');
+            setIntroAlreadyDone(true);
+            setStep(STEP_NAME);
+          }}
+        />
+      );
+    }
+
+    if (step === 3) {
       return (
         <View style={styles.stepBody}>
           <Text style={styles.heading}>What should we call you?</Text>
@@ -521,7 +577,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
       );
     }
 
-    if (step === 2) {
+    if (step === 4) {
       return (
         <View style={styles.stepBody}>
           <Text style={styles.heading}>What are you working towards?</Text>
@@ -564,7 +620,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
       );
     }
 
-    if (step === 3) {
+    if (step === 5) {
       return (
         <View style={styles.stepBody}>
           <Text style={styles.heading}>Why does this matter to you?</Text>
@@ -586,7 +642,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
       );
     }
 
-    if (step === 4) {
+    if (step === 6) {
       return (
         <View style={styles.stepBody}>
           <Text style={styles.heading}>Add photos that represent your goal</Text>
@@ -622,21 +678,21 @@ export default function OnboardingScreen({ onComplete }: Props) {
       );
     }
 
-    if (step === 5) {
+    if (step === 7) {
       const saveIntentionsAndContinue = async () => {
         const arr = intentionRows.map((s) => s.trim()).filter(Boolean);
         await AsyncStorage.setItem('user_intentions', JSON.stringify(arr));
         const inferred = inferTrackingFromIntentionText(arr.join(' '));
         setSelectedTrackingIds(new Set(inferred));
         setTrackingSelectionError(false);
-        setStep(6);
+        setStep(8);
       };
 
       const skipIntentions = async () => {
         await AsyncStorage.setItem('user_intentions', JSON.stringify([]));
         setSelectedTrackingIds(new Set());
         setTrackingSelectionError(false);
-        setStep(6);
+        setStep(8);
       };
 
       const fillNextEmptyIntention = (text: string) => {
@@ -712,7 +768,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
       );
     }
 
-    if (step === 6) {
+    if (step === 8) {
       return (
         <View style={styles.stepBody}>
           <Text style={styles.heading}>Build your plan</Text>
@@ -748,7 +804,44 @@ export default function OnboardingScreen({ onComplete }: Props) {
       );
     }
 
-    if (step === 7) {
+    if (step === 9) {
+      const rewardIntro = `When you reach your goal, you're going to celebrate. What's the one thing that would make it feel truly worth it?`;
+
+      return (
+        <View style={styles.stepBody}>
+          <Text style={styles.heading}>What will you reward yourself with?</Text>
+          <Text style={styles.rewardSubtext}>{rewardIntro}</Text>
+
+          <TextInput
+            value={rewardName}
+            onChangeText={setRewardName}
+            placeholder='Reward name (e.g. "Dyson Airwrap")'
+            placeholderTextColor="#9CA3AF"
+            style={styles.input}
+          />
+
+          <Pressable style={styles.rewardCard} onPress={() => void pickRewardPhoto()}>
+            {rewardPhoto ? (
+              <Image source={{ uri: rewardPhoto }} style={styles.rewardImage} />
+            ) : (
+              <View style={styles.rewardPlaceholder}>
+                <Text style={styles.rewardEmoji}>🎁</Text>
+                <Text style={styles.rewardPlaceholderText}>Tap to add a reward photo</Text>
+              </View>
+            )}
+          </Pressable>
+
+          <Pressable style={styles.primaryButton} onPress={() => setStep(STEP_DAYS)}>
+            <Text style={styles.primaryButtonText}>Continue</Text>
+          </Pressable>
+          <Pressable onPress={() => setStep(STEP_DAYS)}>
+            <Text style={styles.skipText}>Add Later</Text>
+          </Pressable>
+        </View>
+      );
+    }
+
+    if (step === STEP_DAYS) {
       return (
         <View style={styles.stepBody}>
           <Text style={styles.heading}>How many days are you committing to?</Text>
@@ -789,59 +882,23 @@ export default function OnboardingScreen({ onComplete }: Props) {
                 );
                 return;
               }
-              setStep(8);
+              if (configFlowOrder.length > 0) {
+                setStep(CFG_BASE_STEP);
+              } else {
+                void finishOnboarding();
+              }
             }}
           >
-            <Text style={styles.primaryButtonText}>Continue</Text>
-          </Pressable>
-        </View>
-      );
-    }
-
-    if (step === 8 + configFlowOrder.length && trackingOrder.length > 0) {
-      const rewardIntro =
-        resolvedTargetDays != null && resolvedTargetDays > 0
-          ? `You've committed to ${resolvedTargetDays} days of showing up for yourself. When you get there, you're going to celebrate. What's the one thing that would make hitting this goal feel truly worth it?`
-          : `You've committed to your goal. When you get there, you're going to celebrate. What's the one thing that would make hitting this goal feel truly worth it?`;
-
-      return (
-        <View style={styles.stepBody}>
-          <Text style={styles.heading}>What will you reward yourself with?</Text>
-          <Text style={styles.rewardSubtext}>{rewardIntro}</Text>
-
-          <TextInput
-            value={rewardName}
-            onChangeText={setRewardName}
-            placeholder='Reward name (e.g. "Dyson Airwrap")'
-            placeholderTextColor="#9CA3AF"
-            style={styles.input}
-          />
-
-          <Pressable style={styles.rewardCard} onPress={() => void pickRewardPhoto()}>
-            {rewardPhoto ? (
-              <Image source={{ uri: rewardPhoto }} style={styles.rewardImage} />
-            ) : (
-              <View style={styles.rewardPlaceholder}>
-                <Text style={styles.rewardEmoji}>🎁</Text>
-                <Text style={styles.rewardPlaceholderText}>Tap to add a reward photo</Text>
-              </View>
-            )}
-          </Pressable>
-
-          <Pressable style={styles.primaryButton} onPress={() => void finishOnboarding()}>
             <Text style={styles.primaryButtonText}>
-              {saving ? 'Saving...' : 'Lock it in 🔒'}
+              {configFlowOrder.length > 0 ? 'Continue' : saving ? 'Saving...' : 'Done'}
             </Text>
           </Pressable>
-          <Pressable onPress={() => void finishOnboarding()} disabled={saving}>
-            <Text style={styles.skipText}>Add Later</Text>
-          </Pressable>
         </View>
       );
     }
 
-    if (step >= 8 && step < 8 + configFlowOrder.length) {
-      const configIndex = step - 8;
+    if (step >= CFG_BASE_STEP && step < CFG_BASE_STEP + configFlowOrder.length) {
+      const configIndex = step - CFG_BASE_STEP;
       const kind = configFlowOrder[configIndex];
       const isLast = configIndex === configFlowOrder.length - 1;
       if (!kind) {
@@ -1158,7 +1215,7 @@ export default function OnboardingScreen({ onComplete }: Props) {
     return null;
   };
 
-  const stepTotalDenominator = configFlowOrder.length > 0 ? 9 + configFlowOrder.length : 10;
+  const stepTotalDenominator = 11 + configFlowOrder.length;
 
   const topBar =
     step > 0 ? (
@@ -1179,9 +1236,18 @@ export default function OnboardingScreen({ onComplete }: Props) {
     </>
   );
 
+  const isIntroStep = step === STEP_APP_INTRO_1 || step === STEP_APP_INTRO_2;
+  const isConfigKeyboardStep =
+    step >= CFG_BASE_STEP && step < CFG_BASE_STEP + configFlowOrder.length;
+
   return (
     <SafeAreaView style={styles.screen}>
-      {step >= 8 && step < 8 + configFlowOrder.length ? (
+      {isIntroStep ? (
+        <View style={[styles.introShell, styles.content]}>
+          {topBar}
+          {renderStep()}
+        </View>
+      ) : isConfigKeyboardStep ? (
         <KeyboardAvoidingView
           style={styles.keyboardAvoidingFill}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -1212,6 +1278,9 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: '#1A1A1A',
+  },
+  introShell: {
+    flex: 1,
   },
   content: {
     flexGrow: 1,

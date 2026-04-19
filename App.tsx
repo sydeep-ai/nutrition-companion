@@ -25,11 +25,9 @@ import MotivationalQuote, { motivationalQuotes } from './components/Motivational
 import DashboardScreen from './app/dashboard';
 import HistoryScreen from './app/history';
 import SettingsScreen from './app/settings';
-import AppIntro from './components/AppIntro';
 import { scheduleAllNotifications } from './services/notifications';
 import { computePlanDayFromPlanStart } from './services/storage';
 
-const INTRO_COMPLETE_KEY = 'intro_complete';
 const LAST_QUOTE_DATE_KEY = 'last_quote_date';
 const MILESTONE_7_KEY = 'milestone_shown_7';
 const MILESTONE_14_KEY = 'milestone_shown_14';
@@ -129,14 +127,13 @@ export default function App() {
 
   const [hydrating, setHydrating] = useState(true);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
-  const [introComplete, setIntroComplete] = useState(false);
   const [showDailyQuote, setShowDailyQuote] = useState(false);
   const [dailyQuote, setDailyQuote] = useState('');
   const [milestonePayload, setMilestonePayload] = useState<MilestoneCelebrationPayload | null>(null);
   const [showMilestone, setShowMilestone] = useState(false);
   const [deferDailyQuoteAfterMilestone, setDeferDailyQuoteAfterMilestone] = useState(false);
 
-  const runPostIntroBootstrap = useCallback(async () => {
+  const runPostOnboardingBootstrap = useCallback(async () => {
     const today = new Date().toISOString().split('T')[0];
     const lastQuote = await AsyncStorage.getItem(LAST_QUOTE_DATE_KEY);
     const needsDailyQuote = lastQuote !== today;
@@ -213,31 +210,22 @@ export default function App() {
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        const [onboardingFlag, introRaw] = await AsyncStorage.multiGet([
-          'onboarding_complete',
-          INTRO_COMPLETE_KEY,
-        ]);
-        const complete = onboardingFlag[1] === 'true';
-        const introDone = introRaw[1] === 'true';
+        const onboardingEntry = await AsyncStorage.getItem('onboarding_complete');
+        const complete = onboardingEntry === 'true';
         setOnboardingComplete(complete);
-        setIntroComplete(introDone);
 
         if (!complete) {
           return;
         }
 
-        if (!introDone) {
-          return;
-        }
-
-        await runPostIntroBootstrap();
+        await runPostOnboardingBootstrap();
       } finally {
         setHydrating(false);
       }
     };
 
     void bootstrap();
-  }, [runPostIntroBootstrap]);
+  }, [runPostOnboardingBootstrap]);
 
   const handleLetsGo = useCallback(async () => {
     const today = new Date().toISOString().split('T')[0];
@@ -245,24 +233,12 @@ export default function App() {
     setShowDailyQuote(false);
   }, []);
 
-  const handleIntroComplete = useCallback(async () => {
-    await AsyncStorage.setItem(INTRO_COMPLETE_KEY, 'true');
-    setIntroComplete(true);
-    await runPostIntroBootstrap();
-  }, [runPostIntroBootstrap]);
-
   const handleOnboardingComplete = useCallback(() => {
     void (async () => {
       setOnboardingComplete(true);
-      const introRaw = await AsyncStorage.getItem(INTRO_COMPLETE_KEY);
-      if (introRaw === 'true') {
-        setIntroComplete(true);
-        await runPostIntroBootstrap();
-      } else {
-        setIntroComplete(false);
-      }
+      await runPostOnboardingBootstrap();
     })();
-  }, [runPostIntroBootstrap]);
+  }, [runPostOnboardingBootstrap]);
 
   const handleMilestoneDismiss = useCallback(async () => {
     const p = milestonePayload;
@@ -295,13 +271,13 @@ export default function App() {
   }, [showMilestone, milestonePayload]);
 
   useEffect(() => {
-    if (!onboardingComplete || !introComplete) {
+    if (!onboardingComplete) {
       return;
     }
     scheduleAllNotifications().catch(() => {
       /* ignore */
     });
-  }, [onboardingComplete, introComplete]);
+  }, [onboardingComplete]);
 
   if (!fontsLoaded || hydrating) {
     return null;
@@ -311,15 +287,6 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <OnboardingScreen onComplete={handleOnboardingComplete} />
-        <StatusBar style="dark" />
-      </SafeAreaProvider>
-    );
-  }
-
-  if (!introComplete) {
-    return (
-      <SafeAreaProvider>
-        <AppIntro onComplete={handleIntroComplete} />
         <StatusBar style="dark" />
       </SafeAreaProvider>
     );
@@ -336,7 +303,6 @@ export default function App() {
             setMilestonePayload(null);
             setShowDailyQuote(false);
             setDeferDailyQuoteAfterMilestone(false);
-            setIntroComplete(false);
             setOnboardingComplete(false);
           }}
         />

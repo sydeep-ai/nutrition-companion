@@ -396,35 +396,6 @@ export default function SettingsScreen({ openEditPlanRef: _openEditPlanRef, onRe
     );
   };
 
-  const clearToday = () => {
-    Alert.alert(
-      "Clear today's data?",
-      "This will reset all of today's tracking. Your plan and goals are not affected.",
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear',
-          style: 'destructive',
-          onPress: () =>
-            void (async () => {
-              try {
-                const today = new Date().toISOString().split('T')[0];
-                const allKeys = await AsyncStorage.getAllKeys();
-                const todayKeys = allKeys.filter((k) => k.includes(today));
-                await AsyncStorage.multiRemove(todayKeys);
-                Alert.alert('Done', "Today's data has been cleared.");
-              } catch (e) {
-                Alert.alert(
-                  'Could not clear',
-                  e instanceof Error ? e.message : 'Something went wrong.'
-                );
-              }
-            })(),
-        },
-      ]
-    );
-  };
-
   const openTrackRecord = () => {
     navigation.dispatch(CommonActions.navigate({ name: 'History' }));
   };
@@ -526,16 +497,6 @@ export default function SettingsScreen({ openEditPlanRef: _openEditPlanRef, onRe
         ) : null}
 
         <Text style={styles.sectionTitle}>App</Text>
-        <TouchableOpacity
-          style={styles.row}
-          onPress={clearToday}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel="Clear today data"
-        >
-          <Text style={styles.rowLabel}>Clear today&apos;s data</Text>
-          <Text style={styles.chevron}>›</Text>
-        </TouchableOpacity>
         <Text style={styles.version}>Version 1.0.0</Text>
       </ScrollView>
 
